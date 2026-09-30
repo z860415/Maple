@@ -25,6 +25,10 @@
 .calendar-event.selected-event{outline:1px solid var(--accent)}
 .calendar-more{height:23px;padding:2px 6px;font-size:11px;text-align:left;border:0;background:transparent;color:var(--muted)}
 #dayHeading{font-size:1.1rem;margin:0 0 16px}
+.raid-list-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.raid-list-heading #dayHeading{margin:0}
+#mineFilters{display:flex;flex-direction:row;align-items:center;gap:8px;margin:0;font-size:13px}
+#mineStatus{width:auto;max-width:100%;padding:7px 9px;font-size:13px}
 #detail{scroll-margin-top:20px}
 #detail:focus-visible{outline:2px solid var(--accent)}
 #raidTooltip{position:fixed;z-index:100;pointer-events:none;width:min(320px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:hidden;background:#213234;border:1px solid #647e75;border-radius:6px;padding:14px;box-shadow:0 8px 24px #0006;overflow-wrap:anywhere;font-size:14px}

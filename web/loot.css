@@ -10,3 +10,7 @@ dialog:has(#lootForm){width:min(900px,calc(100% - 32px))}
 .loot-editor input[type=number]{text-align:right}
 .loot-editor button{width:36px;height:36px;padding:0;border-radius:6px}
 #lootForm .table-wrap{margin-bottom:8px}
+.loot-presets{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 16px}
+.loot-presets>span{font-size:13px;color:var(--muted)}
+.loot-presets button{padding:6px 9px;border-radius:6px;font-size:12px;line-height:1.5;max-width:100%;overflow-wrap:anywhere;text-align:left}
+.loot-presets button span{font-size:15px}
