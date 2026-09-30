@@ -1,0 +1,10 @@
+{
+  "name": "maple-api",
+  "main": "worker.js",
+  "compatibility_date": "2026-08-01",
+  "vars": {
+    "PUBLIC_API_URL": "https://maple-api.z860415.workers.dev",
+    "FRONTEND_URL": "https://z860415.github.io/Maple/"
+  },
+  "d1_databases": [{"binding":"DB","database_name":"maple-db","database_id":"REPLACE_WITH_YOUR_D1_DATABASE_ID"}]
+}

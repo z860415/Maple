@@ -1,0 +1,49 @@
+import {JSDOM} from 'jsdom';
+import {readFileSync} from 'node:fs';
+import {join,resolve} from 'node:path';
+import assert from 'node:assert/strict';
+import {Miniflare} from 'miniflare';
+import {digest} from '../worker.js';
+const root=resolve('.'),url='https://api.test';let dom;const stderr='';
+const pause=()=>new Promise(r=>setTimeout(r,25));
+async function until(test,label){for(let i=0;i<200;i++){if(await test())return;await pause()}throw Error('Timed out: '+label+' '+dom?.window.document.querySelector('#notice').textContent)}
+const mf=new Miniflare({modules:true,scriptPath:'worker.js',compatibilityDate:'2026-08-01',d1Databases:['DB'],bindings:{FRONTEND_URL:'https://z860415.github.io/Maple/'}});
+try{
+const db=await mf.getD1Database('DB');await db.exec(readFileSync('schema.sql','utf8').replace(/CREATE TRIGGER[\s\S]*?END;/,m=>m.replace(/\n/g,' ')));
+await db.prepare("INSERT INTO users(id,name) VALUES('1','測試玩家')").run();await db.prepare('INSERT INTO sessions VALUES(?,?,?)').bind(await digest('ui-token'),'1',Date.now()+1000000).run();
+ const html=readFileSync(join(root,'web/index.html'),'utf8').replace(/<script[\s\S]*?<\/script>/g,'');
+ dom=new JSDOM(html,{url,runScripts:'outside-only'});
+ const w=dom.window, d=w.document;
+ w.fetch=(p,opt)=>mf.dispatchFetch(new URL(p,url),opt);
+ w.sessionStorage.setItem('guild_token','ui-token');
+ w.confirm=()=>true;
+ w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')};
+ w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open')};
+ w.eval(readFileSync(join(root,'web/config.js'),'utf8'));
+ w.eval(readFileSync(join(root,'web/app.js'),'utf8'));
+ const click=s=>{assert.ok(d.querySelector(s),'Missing '+s);d.querySelector(s).click()};
+ const fill=(s,v)=>{const e=d.querySelector(s);assert.ok(e,s);e.value=String(v);e.dispatchEvent(new w.Event('input',{bubbles:true}))};
+ const submit=s=>d.querySelector(s).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+ const closed=()=>!d.querySelector('#modal').hasAttribute('open');
+
+ await until(()=>!d.querySelector('#workspace').hidden,'signed in');click('#profileButton');
+ for(const [name,value] of Object.entries({name:'介面測試員',job:'聖騎士',level:177,attack:37000,boss:30,ignore:17}))fill(`[name="${name}"]`,value);
+ submit('#profileForm');await until(closed,'profile saved');
+ click('#newRaid');fill('[name=title]','週六測試王團');fill('[name=bosses]','皮卡啾');fill('[name=starts]','2099-09-30T22:00');submit('#raidForm');
+ await until(()=>d.querySelector('#start'),'created raid');
+ assert.match(d.querySelector('#detail').textContent,/介面測試員/);
+ click('#start');await until(()=>d.querySelector('.attend'),'started');
+ d.querySelector('.attend').checked=true;click('#saveAttendance');
+ await until(()=>d.querySelector('#notice').textContent==='出席名單已儲存','attendance saved');
+ click('#done');await until(()=>d.querySelector('#loot'),'completed');click('#loot');
+ fill('#items input:nth-child(1)','混沌卷軸');fill('#items input:nth-child(3)',10000000);
+ click('#addCost');fill('#costs input:nth-child(1)','天氣');fill('#costs input:nth-child(2)',2);fill('#costs input:nth-child(3)',900);
+ assert.equal(d.querySelector('#costs input:nth-child(4)').value,'1000000');
+ assert.equal(d.querySelector('#preview').textContent,'8,700,000 楓幣');
+ submit('#lootForm');await until(()=>d.querySelector('.paid'),'settled');
+ assert.match(d.querySelector('.summary').textContent,/8,700,000/);
+ click('.paid');await until(()=>d.querySelector('.paid')?.dataset.paid==='1','marked paid');
+ click('#resetLoot');await until(()=>d.querySelector('#notice').textContent.includes('取消已領'),'paid reset prevented');
+ click('#logout');await until(()=>!d.querySelector('#welcome').hidden,'logged out');
+ console.log('PASS: UI sign-in, profile, create, attendance, settlement, linked cost conversion, payment lock, logout');
+}finally{dom?.window.close();await mf.dispose()}
