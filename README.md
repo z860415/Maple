@@ -1,4 +1,4 @@
-# 楓星打王集合所 · Cloudflare 版
+# 瑪卡巴卡打王集合所 · Cloudflare 版
 
 Discord 帳號登入、角色資料、自由開團、正取與候補、出席、分寶及領取紀錄。
 任何 Discord 帳號都能登入，只要求 identify，不檢查伺服器或身分組。
@@ -80,7 +80,9 @@ UPDATE raids SET message_id='實際Discord訊息ID',publishing=0,sync_error=NULL
 - 楓點／楓幣是同一筆成本，依最後編輯欄位計算，不重複扣除。
 - 後端使用 BigInt 有理數計算，淨額向下取整，再依出席人數均分；餘數另列。
 - 負收益不允許儲存；超過 JavaScript 安全整數的總額會拒絕。
-- 一個帳號一個角色設定，每次報名保留當時的角色資料。
+- 一個帳號可儲存多個角色，開團與報名時選擇角色；同一團每個帳號只佔一個名額。每次報名保留當時角色資料，後續修改角色不會改寫舊紀錄。
+- 「參團紀錄」顯示個人所有團隊的角色、出席及分寶領取狀態，不受最近 100 團限制。
+- 任一團隊皆可「複製並開團」，帶入名稱、項目、地點、要求及備註，再編輯後建立自己的新團；集合時間預設為一小時後。
 - 一團共用出席名單；不同王需不同分配名單時，分開開團。
 - 能力門檻由團長人工確認。列表顯示最近 100 團，舊資料仍在 D1。
 - 登入有效期 8 小時，登出使該次登入失效。
@@ -88,6 +90,13 @@ UPDATE raids SET message_id='實際Discord訊息ID',publishing=0,sync_error=NULL
 - 同時修改同一團時，後寫入者可能收到重新整理提示；不會覆寫前者。
 
 ## 開發與命令列部署（選用）
+
+現有 D1 升級此版本時，先執行以下 SQL 新增角色表，再更新 Worker 與前端。既有角色會在登入讀取資料時自動保留為第一個角色：
+
+```sql
+CREATE TABLE IF NOT EXISTS characters(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),profile TEXT NOT NULL,created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS characters_user ON characters(user_id);
+```
 
 ```sh
 npm ci

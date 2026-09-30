@@ -1,0 +1,12 @@
+dialog:has(#lootForm){width:min(900px,calc(100% - 32px))}
+.loot-editor{table-layout:fixed;min-width:520px;margin-bottom:12px}
+.loot-editor.cost-editor{min-width:690px}
+.loot-editor .quantity-column{width:90px}
+.loot-editor .amount-column{width:170px}
+.loot-editor .remove-column{width:60px}
+.loot-editor th{font-size:13px;padding:10px 6px}
+.loot-editor td{padding:10px 6px;vertical-align:middle}
+.loot-editor input{padding:9px 8px;font-size:14px}
+.loot-editor input[type=number]{text-align:right}
+.loot-editor button{width:36px;height:36px;padding:0;border-radius:6px}
+#lootForm .table-wrap{margin-bottom:8px}

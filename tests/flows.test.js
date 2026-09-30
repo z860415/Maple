@@ -13,6 +13,18 @@ test('D1: account, raid, waitlist, permission, attendance, payout, concurrency',
  async function api(path,method='GET',data,uid='1',expected=200){const res=await mf.dispatchFetch('https://api.test/api'+path,{method,headers:{Authorization:'Bearer token'+uid,Origin:'https://z860415.github.io',...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined});const out=await res.json();assert.equal(res.status,expected,JSON.stringify(out));assert.equal(res.headers.get('Access-Control-Allow-Origin'),'https://z860415.github.io');return out}
  assert.equal((await api('/config')).login_ready,true);await api('/me/profile','PUT',p);await api('/me','GET',null,'bad',401);
  const input={title:'測試王團',bosses:['炎魔'],starts:new Date(Date.now()+3600000).toISOString(),capacity:2};
+ const alt=await api('/me/characters','POST',{...p,name:'小楓分身',job:'主教'});
+ assert.equal((await api('/me')).characters.length,2);
+ await api('/me/characters/'+encodeURIComponent(alt.id),'PUT',{...p,name:'盜用'},'2',404);
+ await api('/raids','POST',{...input,character_id:alt.id},'2',400);
+ const altRaid=await api('/raids','POST',{...input,character_id:alt.id});
+ assert.equal((await api('/raids')).find(r=>r.id===altRaid.id).members[0].profile.name,'小楓分身');
+ await api('/me/characters/'+encodeURIComponent(alt.id),'PUT',{...p,name:'分身新名稱'});
+ assert.equal((await api('/me/history'))[0].profile.name,'小楓分身');
+ await api('/me/history','GET',null,'2').then(rows=>assert.equal(rows.length,0));
+ const others=await api('/raids','POST',input,'2');
+ await api(`/raids/${others.id}/join`,'POST',{character_id:alt.id});
+ assert.equal((await api('/raids')).find(r=>r.id===others.id).members.find(m=>m.user_id==='1').profile.name,'分身新名稱');
  const {id}=await api('/raids','POST',input);assert.equal((await api('/raids'))[0].members.length,1);
  assert.equal((await api(`/raids/${id}/join`,'POST',{},'2')).seat,'confirmed');assert.equal((await api(`/raids/${id}/join`,'POST',{},'3')).seat,'waiting');await api(`/raids/${id}/join`,'POST',{},'3',409);
  await api(`/raids/${id}/status`,'PUT',{status:'running'},'2',403);
