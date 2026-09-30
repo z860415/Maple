@@ -59,6 +59,11 @@ test('D1: account, raid, waitlist, permission, attendance, payout, concurrency',
  assert.equal(localCallback.status,303);assert(localCallback.headers.get('Location').startsWith('http://localhost:8000/#ticket='));
  const localTicket=new URL(localCallback.headers.get('Location')).hash.slice(8);
  const localExchange=await api('/auth/exchange','POST',{ticket:localTicket,verifier:'a'.repeat(64)});assert(localExchange.token);
+ assert.equal((await db.prepare('SELECT expires FROM sessions WHERE hash=?').bind(await digest(localExchange.token)).first()).expires,0);
+ const persistentHeaders={Authorization:'Bearer '+localExchange.token};
+ assert.equal((await mf.dispatchFetch('https://api.test/api/me',{headers:persistentHeaders})).status,200);
+ await mf.dispatchFetch('https://api.test/api/auth/logout',{method:'POST',headers:persistentHeaders});
+ assert.equal((await mf.dispatchFetch('https://api.test/api/me',{headers:persistentHeaders})).status,401);
  const sync=await worker.fetch(new Request(`https://api.test/api/raids/${id}/discord`,{method:'POST',headers:{Authorization:'Bearer token1'}}),env,{waitUntil(){}});assert.equal(sync.status,200);assert.equal(calls.at(-1).opts.method,'POST');
  await worker.fetch(new Request(`https://api.test/api/raids/${id}/discord`,{method:'POST',headers:{Authorization:'Bearer token1'}}),env,{waitUntil(){}});assert.equal(calls.at(-1).opts.method,'PATCH');assert.deepEqual(JSON.parse(calls.at(-1).opts.body).allowed_mentions,{parse:[]});
  await api('/auth/logout','POST');await api('/me','GET',null,'1',401);

@@ -64,10 +64,11 @@ async function route(req,e,ctx){
  }
  if(path==='/api/auth/exchange'&&method==='POST'){
   const p=await body();text(p.ticket,100,20);text(p.verifier,100,32);const t=await one('DELETE FROM tickets WHERE hash=? AND expires>? AND challenge=? RETURNING user_id',await digest(p.ticket),now(),await digest(p.verifier));if(!t)fail(401,'登入連結已失效');
-  const token=random();await db.batch([q('DELETE FROM sessions WHERE expires<?',now()),q('INSERT INTO sessions VALUES(?,?,?)',await digest(token),t.user_id,now()+28800000)]);return json({token});
+  const token=random();await db.batch([q('DELETE FROM sessions WHERE expires>0 AND expires<?',now()),q('INSERT INTO sessions VALUES(?,?,?)',await digest(token),t.user_id,0)]);return json({token});
  }
  const bearer=req.headers.get('Authorization')||'';if(!bearer.startsWith('Bearer '))fail(401,'請先使用 Discord 登入');
- const hash=await digest(bearer.slice(7)),u=await one('SELECT users.* FROM sessions JOIN users ON users.id=sessions.user_id WHERE hash=? AND expires>?',hash,now());if(!u)fail(401,'登入已過期，請重新登入');
+ const hash=await digest(bearer.slice(7)),u=await one('SELECT users.* FROM sessions JOIN users ON users.id=sessions.user_id WHERE hash=? AND (expires=0 OR expires>?)',hash,now());if(!u)fail(401,'登入已過期，請重新登入');
+ if(path!=='/api/auth/logout')await q('UPDATE sessions SET expires=0 WHERE hash=? AND expires>0',hash).run();
  if(path==='/api/auth/logout'&&method==='POST'){await q('DELETE FROM sessions WHERE hash=?',hash).run();return json({ok:true})}
  async function characters(){if(JSON.parse(u.profile).name)await q('INSERT OR IGNORE INTO characters VALUES(?,?,?,?)','legacy:'+u.id,u.id,u.profile,0).run();return (await all('SELECT * FROM characters WHERE user_id=? ORDER BY created,id',u.id)).map(c=>({...c,profile:JSON.parse(c.profile)}))}
  async function selectedProfile(p){if(!p.character_id){if(!JSON.parse(u.profile).name)fail(400,'請先填寫角色資料');return u.profile}const c=await one('SELECT profile FROM characters WHERE id=? AND user_id=?',text(p.character_id,100,1),u.id);if(!c)fail(400,'找不到你的角色');return c.profile}

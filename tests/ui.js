@@ -27,6 +27,15 @@ await db.prepare("INSERT INTO users(id,name) VALUES('1','測試玩家')").run();
  const closed=()=>!d.querySelector('#modal').hasAttribute('open');
 
  await until(()=>!d.querySelector('#workspace').hidden,'signed in');click('#profileButton');
+ assert.match(d.cookie,/guild_token=ui-token/);assert.equal(w.sessionStorage.getItem('guild_token'),null);
+ const anotherTab=new JSDOM(html,{url,runScripts:'outside-only',cookieJar:dom.cookieJar});
+ anotherTab.window.fetch=w.fetch;anotherTab.window.eval(readFileSync(join(root,'web/app.js'),'utf8'));
+ await until(()=>!anotherTab.window.document.querySelector('#workspace').hidden,'remembered in new tab');
+ anotherTab.window.document.cookie='guild_token=; Path=/; Max-Age=0';
+ anotherTab.window.dispatchEvent(new anotherTab.window.Event('focus'));
+ await until(()=>!anotherTab.window.document.querySelector('#welcome').hidden,'cleared cookie logged out');
+ w.eval("rememberLogin('ui-token')");
+ anotherTab.window.close();
  for(const [name,value] of Object.entries({name:'介面測試員',job:'聖騎士',level:177,attack:37000,boss:30,ignore:17}))fill(`[name="${name}"]`,value);
  submit('#profileForm');await until(closed,'profile saved');
  click('#profileButton');click('#addCharacter');
@@ -73,5 +82,6 @@ await db.prepare("INSERT INTO users(id,name) VALUES('1','測試玩家')").run();
  click('.paid');await until(()=>d.querySelector('.paid')?.dataset.paid==='1','marked paid');
  click('#resetLoot');await until(()=>d.querySelector('#notice').textContent.includes('取消已領'),'paid reset prevented');
  click('#logout');await until(()=>!d.querySelector('#welcome').hidden,'logged out');
+ assert.doesNotMatch(d.cookie,/guild_token=/);
  console.log('PASS: UI sign-in, profile, create, attendance, settlement, linked cost conversion, payment lock, logout');
 }finally{dom?.window.close();await mf.dispose()}
