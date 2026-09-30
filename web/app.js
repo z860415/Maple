@@ -14,7 +14,7 @@ function modal(title,body){$('#modalTitle').textContent=title;$('#modalBody').in
 $('#closeModal').onclick=()=>$('#modal').close();
 function formHandler(id,fn){$(id).onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('[type=submit]');button.disabled=true;try{await fn(new FormData(e.target));$('#modal').close();notice('');await load()}catch(e){let p=e.target.querySelector('.inline-error');if(!p){p=document.createElement('p');p.className='inline-error';p.setAttribute('role','alert');e.target.append(p)}p.textContent=e.message}finally{button.disabled=false}}}
 function renderAccount(){$('#welcome').hidden=!!state.me;$('#workspace').hidden=!state.me;$('#newRaid').hidden=!state.me;$('#account').innerHTML=state.me?`<span>${esc(state.me.name)}</span><button id="logout">登出</button>`:'<span class="muted">Discord 帳號登入</span>';if(state.me)$('#logout').onclick=()=>action(async()=>{await api('/auth/logout','POST');forgetLogin();state.me=null;renderAccount()})}
-async function load(){if(!loginToken()){state.me=null;state.raids=[];renderAccount();return}state.me=await api('/me');state.raids=await api('/raids');renderAccount();renderList();renderDetail()}
+async function load(){if(!loginToken()){state.me=null;state.raids=[];renderAccount();return}state.me=await api('/me');state.raids=await api('/raids');for(const [key,change] of attendanceChanges){if(change.dirty||change.saving)updateAttendanceMember(change);else attendanceChanges.delete(key)}renderAccount();renderList();renderDetail()}
 window.addEventListener('focus',()=>action(load));
 const dateKey=v=>new Date(new Date(v).getTime()+8*3600000).toISOString().slice(0,10);
 state.calendarDate=dateKey(Date.now());state.calendarMonth=state.calendarDate.slice(0,7);state.calendarRaid=null;
@@ -63,14 +63,37 @@ bind('sync',async()=>{await api(`/raids/${r.id}/discord`,'POST');await load();no
 document.querySelectorAll('.paid').forEach(b=>b.onclick=()=>action(async()=>{await api(`/raids/${r.id}/paid/${encodeURIComponent(b.dataset.user)}`,'PUT',{paid:b.dataset.paid!=='1'});await load()}));const duplicate=document.createElement('button');duplicate.id='duplicate';duplicate.textContent='複製並開團';duplicate.onclick=()=>raidForm(r,true);$('#detail .actions').append(duplicate);}
 function profileForm(id=state.me.characters?.[0]?.id){const p=state.me.characters?.find(c=>c.id===id)?.profile||{};modal('我的角色',`${characterPicker(id,true)}<form id="profileForm"><p class="muted">乾表填完整數字，例如 3.7 萬填 37000。資料更新會用於下一次報名。</p><label>角色 ID<input name="name" required maxlength="32" value="${esc(p.name)}"></label><label>職業<input name="job" required maxlength="24" placeholder="例如：聖騎士" value="${esc(p.job)}"></label><div class="form-grid"><label>等級<input name="level" type="number" min="1" max="300" required value="${p.level||140}"></label><label>乾表<input name="attack" type="number" min="0" max="1000000000" required value="${p.attack||0}"></label><label>B 傷 (%)<input name="boss" type="number" min="0" max="5000" step="0.1" required value="${p.boss||0}"></label><label>無視 (%)<input name="ignore" type="number" min="0" max="100" step="0.1" required value="${p.ignore||0}"></label></div><button class="primary" type="submit">儲存角色</button></form>`);formHandler('#profileForm',async f=>{await api(id?'/me/characters/'+encodeURIComponent(id):'/me/characters',id?'PUT':'POST',{name:f.get('name'),job:f.get('job'),...Object.fromEntries(['level','attack','boss','ignore'].map(k=>[k,Number(f.get(k))]))})});$('#manageCharacter').onchange=e=>profileForm(e.target.value);$('#addCharacter').onclick=()=>profileForm('')}
 $('#profileButton').onclick=()=>profileForm();
-function lockAttendance(){document.querySelectorAll('.attend,#done,#loot,#resetLoot').forEach(e=>e.disabled=!!state.attendanceSaving)}
-async function saveAttendance(r,input){
- if(state.attendanceSaving)return;
- const previous=!!r.members.find(m=>m.user_id===input.dataset.user)?.attended;
- state.attendanceSaving=true;lockAttendance();notice('正在儲存出席狀態…');
- try{await api(`/raids/${r.id}/attendance`,'PUT',{user_id:input.dataset.user,attended:input.checked});await load();notice('出席狀態已儲存')}
- catch(e){input.checked=previous;notice('出席狀態儲存失敗：'+e.message)}
- finally{state.attendanceSaving=false;lockAttendance()}
+const attendanceChanges=new Map();let attendanceWriting=false;
+function lockAttendance(){
+ const changes=[...attendanceChanges.values()].filter(c=>c.raid===state.selected),pending=changes.some(c=>c.dirty||c.saving);
+ document.querySelectorAll('#done,#loot,#resetLoot').forEach(e=>e.disabled=pending);
+ document.querySelectorAll('.attend').forEach(input=>{
+  const change=changes.find(c=>c.user===input.dataset.user);
+  if(change)input.checked=change.desired;
+  let status=input.parentElement.querySelector('.attendance-status');
+  if(!status){status=document.createElement('small');status.className='attendance-status';status.setAttribute('role','status');status.style.minHeight='16px';input.after(status)}
+  status.textContent=change?(change.saving||change.dirty?'儲存中…':change.error?'儲存失敗':'已儲存'):'';
+  input.setAttribute('aria-busy',String(!!change&&(change.saving||change.dirty)));
+ });
+}
+function updateAttendanceMember(change){const member=state.raids.find(r=>r.id===change.raid)?.members.find(m=>m.user_id===change.user);if(member)member.attended=change.desired?1:0}
+function saveAttendance(r,input){
+ const key=r.id+':'+input.dataset.user;
+ let change=attendanceChanges.get(key);
+ if(!change){change={raid:r.id,user:input.dataset.user,confirmed:!!r.members.find(m=>m.user_id===input.dataset.user)?.attended};attendanceChanges.set(key,change)}
+ change.desired=input.checked;change.dirty=true;change.error=false;notice('');updateAttendanceMember(change);lockAttendance();void flushAttendance();
+}
+async function flushAttendance(){
+ if(attendanceWriting)return;attendanceWriting=true;
+ try{
+  let change;
+  while((change=[...attendanceChanges.values()].find(c=>c.dirty))){
+   change.dirty=false;change.saving=true;const value=change.desired;lockAttendance();
+   try{await api(`/raids/${change.raid}/attendance`,'PUT',{user_id:change.user,attended:value});change.confirmed=value;change.dirty=change.desired!==value;notice('出席狀態已儲存')}
+   catch(e){if(!change.dirty){change.desired=change.confirmed;change.error=true}notice('出席狀態儲存失敗：'+e.message)}
+   finally{change.saving=false;updateAttendanceMember(change);lockAttendance()}
+  }
+ }finally{attendanceWriting=false}
 }
 function characterPicker(id,manage=false){return `<label>遊戲角色<select ${manage?'id="manageCharacter"':'name="character_id" required'}>${manage&&!id?'<option value="">新增角色</option>':''}${(state.me.characters||[]).map(c=>`<option value="${esc(c.id)}" ${c.id===id?'selected':''}>${esc(c.profile.name)} / ${esc(c.profile.job)} / Lv.${c.profile.level}</option>`).join('')}</select></label>${manage?'<button type="button" id="addCharacter">＋ 新增角色</button>':''}`}
 $('#historyButton').onclick=()=>action(async()=>{const rows=await api('/me/history');modal('參團紀錄',`<div class="table-wrap"><table><thead><tr><th>團隊 / 時間</th><th>角色</th><th>出席 / 分寶</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.title)}<small>${esc(when(r.starts))} · ${statuses[r.status]}</small></td><td>${esc(r.profile.name)}<small>${esc(r.profile.job)} · Lv.${r.profile.level}</small></td><td>${r.attended?'已出席':r.seat==='waiting'?'候補':'未出席'}<small>${r.settlement?.result.users.includes(state.me.id)?fmt(r.settlement.result.each)+' 楓幣 · '+(r.paid?'已領取':'未領取'):'未分寶'}</small></td></tr>`).join('')||'<tr><td colspan="3">尚無參團紀錄</td></tr>'}</tbody></table></div>`)});
