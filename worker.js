@@ -22,10 +22,12 @@ export function calculate(p,users){
  return {gross:Number(gross),fee:String(Number(fee)/Number(den)),cost:String(Number(cost)/Number(rate)),net:String(Number(net)/Number(den)),total:Number(total),count:users.length,each:Number(each),remainder:Number(total-each*BigInt(users.length)),users};
 }
 const redirect=(url,cookie)=>new Response(null,{status:303,headers:{Location:url,...(cookie?{'Set-Cookie':cookie}:{})}});
+const frontendURLs=e=>[e.FRONTEND_URL,...[8000,8080].flatMap(port=>['localhost','127.0.0.1'].map(host=>`http://${host}:${port}/`))].filter(Boolean);
 export default {async fetch(req,env,ctx){
  let res;try{res=await route(req,env,ctx)}catch(e){res=json({detail:e.status?e.message:'伺服器暫時無法處理，請稍後重試'},e.status||500);if(!e.status)console.error('Request failed:',e.message)}
  const h=new Headers(res.headers);h.set('Cache-Control','no-store');h.set('Referrer-Policy','no-referrer');h.set('X-Content-Type-Options','nosniff');
- if(env.FRONTEND_URL&&req.headers.get('Origin')===new URL(env.FRONTEND_URL).origin){h.set('Access-Control-Allow-Origin',new URL(env.FRONTEND_URL).origin);h.set('Vary','Origin');h.set('Access-Control-Allow-Headers','Authorization, Content-Type');h.set('Access-Control-Allow-Methods','GET, POST, PUT, DELETE, OPTIONS')}
+ h.set('Vary','Origin');const origin=req.headers.get('Origin');
+ if(frontendURLs(env).some(front=>new URL(front).origin===origin)){h.set('Access-Control-Allow-Origin',origin);h.set('Access-Control-Allow-Headers','Authorization, Content-Type');h.set('Access-Control-Allow-Methods','GET, POST, PUT, DELETE, OPTIONS')}
  return new Response(res.body,{status:res.status,headers:h});
 }};
 async function route(req,e,ctx){
@@ -39,7 +41,8 @@ async function route(req,e,ctx){
  if(path==='/api/health'){await one('SELECT 1');return json({ok:true})}
  if(path==='/api/auth/login'&&method==='GET'){
   if(!ready)fail(503,'尚未設定 Discord 登入');const challenge=url.searchParams.get('challenge');if(!/^[a-f0-9]{64}$/.test(challenge||''))fail(400,'請由網站開始登入');
-  const state=random();await db.batch([q('DELETE FROM oauth WHERE expires<?',now()),q('INSERT INTO oauth VALUES(?,?,?)',await digest(state),now()+600000,challenge)]);
+  const returnTo=url.searchParams.get('return_to')||front;if(!frontendURLs(e).includes(returnTo))fail(400,'不允許此登入返回網址');
+  const state=random();await db.batch([q('DELETE FROM oauth WHERE expires<?',now()),q('INSERT INTO oauth VALUES(?,?,?)',await digest(state),now()+600000,JSON.stringify({challenge,front:returnTo}))]);
   const params=new URLSearchParams({client_id:e.DISCORD_CLIENT_ID,response_type:'code',redirect_uri:publicURL+'/api/auth/callback',scope:'identify',state});
   return redirect('https://discord.com/oauth2/authorize?'+params,`oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=600`);
  }
@@ -48,13 +51,16 @@ async function route(req,e,ctx){
   if(!state||state!==cookie)fail(400,'登入驗證失敗，請重新登入');
   const valid=await one('DELETE FROM oauth WHERE hash=? AND expires>? RETURNING challenge',await digest(state),now());
   if(!valid||url.searchParams.has('error')||!url.searchParams.get('code'))fail(400,'登入取消或已過期');
+  // Existing in-flight logins stored only the challenge; new ones also bind the return URL.
+  const login=valid.challenge.startsWith('{')?JSON.parse(valid.challenge):{challenge:valid.challenge,front};
+  if(!frontendURLs(e).includes(login.front))fail(400,'不允許此登入返回網址');
   const fetcher=e.TEST_FETCH||fetch;
   const tr=await fetcher('https://discord.com/api/v10/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:e.DISCORD_CLIENT_ID,client_secret:e.DISCORD_CLIENT_SECRET,grant_type:'authorization_code',code:url.searchParams.get('code'),redirect_uri:publicURL+'/api/auth/callback'}),signal:AbortSignal.timeout(15000)});
   if(!tr.ok)fail(502,'Discord 驗證失敗，請重新登入');const token=await tr.json();
   const ur=await fetcher('https://discord.com/api/v10/users/@me',{headers:{Authorization:'Bearer '+token.access_token},signal:AbortSignal.timeout(15000)});if(!ur.ok)fail(502,'Discord 暫時無法驗證');const user=await ur.json();
   if(!/^\d+$/.test(user.id))fail(502,'Discord 帳號格式有誤');const ticket=random();
-  await db.batch([q("INSERT INTO users(id,name,avatar) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,avatar=excluded.avatar",user.id,user.global_name||user.username,user.avatar||null),q('DELETE FROM tickets WHERE expires<?',now()),q('INSERT INTO tickets VALUES(?,?,?,?)',await digest(ticket),user.id,now()+60000,valid.challenge)]);
-  return redirect(front.split('#')[0]+'#ticket='+ticket,'oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0');
+  await db.batch([q("INSERT INTO users(id,name,avatar) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,avatar=excluded.avatar",user.id,user.global_name||user.username,user.avatar||null),q('DELETE FROM tickets WHERE expires<?',now()),q('INSERT INTO tickets VALUES(?,?,?,?)',await digest(ticket),user.id,now()+60000,login.challenge)]);
+  return redirect(login.front.split('#')[0]+'#ticket='+ticket,'oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0');
  }
  if(path==='/api/auth/exchange'&&method==='POST'){
   const p=await body();text(p.ticket,100,20);text(p.verifier,100,32);const t=await one('DELETE FROM tickets WHERE hash=? AND expires>? AND challenge=? RETURNING user_id',await digest(p.ticket),now(),await digest(p.verifier));if(!t)fail(401,'登入連結已失效');

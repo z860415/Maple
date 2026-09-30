@@ -91,6 +91,18 @@ UPDATE raids SET message_id='實際Discord訊息ID',publishing=0,sync_error=NULL
 
 ## 開發與命令列部署（選用）
 
+### 本機前端使用線上資料庫
+
+先將最新的 `worker.js` 部署到 Cloudflare（保留原本的 Discord 密鑰、D1 綁定與正式網址設定）。此版本允許 localhost 與 127.0.0.1 的 8000、8080 埠跨來源請求，登入後會返回發起登入的前端。Discord OAuth Redirect 維持線上 Worker 的 callback，不需新增本機 callback。
+
+`web/config.js` 保持線上 API 網址。日常測試只需啟動前端：
+
+```sh
+python3 -m http.server 8080 --directory web
+```
+
+開啟 http://localhost:8080/ 。資料經線上 Worker 寫入正式 D1，不需要 Wrangler 登入、本機資料庫或本機 Discord Secret。
+
 現有 D1 升級此版本時，先執行以下 SQL 新增角色表，再更新 Worker 與前端。既有角色會在登入讀取資料時自動保留為第一個角色：
 
 ```sql

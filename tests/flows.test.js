@@ -44,6 +44,21 @@ test('D1: account, raid, waitlist, permission, attendance, payout, concurrency',
  const oauthState=new URL(login.headers.get('Location')).searchParams.get('state');
  const callback=await worker.fetch(new Request('https://api.test/api/auth/callback?state='+oauthState+'&code=test',{headers:{Cookie:'oauth_state='+oauthState}}),env,{waitUntil(){}});
  assert.equal(callback.status,303);assert.equal(calls.length,2);assert(calls[1].url.endsWith('/users/@me'));assert((await db.prepare('SELECT name FROM users WHERE id=?').bind('999').first()).name==='外部玩家');
+ for(const origin of ['http://localhost:8000','http://127.0.0.1:8000']){
+  const preflight=await mf.dispatchFetch('https://api.test/api/me',{method:'OPTIONS',headers:{Origin:origin}});
+  assert.equal(preflight.headers.get('Access-Control-Allow-Origin'),origin);
+ }
+ const rejected=await mf.dispatchFetch('https://api.test/api/config',{headers:{Origin:'https://untrusted.test'}});
+ assert.equal(rejected.headers.get('Access-Control-Allow-Origin'),null);
+ const badReturn=await mf.dispatchFetch('https://api.test/api/auth/login?challenge='+challenge+'&return_to='+encodeURIComponent('https://untrusted.test/'));
+ assert.equal(badReturn.status,400);
+ const localLogin=await mf.dispatchFetch('https://api.test/api/auth/login?challenge='+challenge+'&return_to='+encodeURIComponent('http://localhost:8000/'),{redirect:'manual'});
+ assert.equal(localLogin.status,303);
+ const localState=new URL(localLogin.headers.get('Location')).searchParams.get('state');
+ const localCallback=await worker.fetch(new Request('https://api.test/api/auth/callback?state='+localState+'&code=test',{headers:{Cookie:'oauth_state='+localState}}),env,{waitUntil(){}});
+ assert.equal(localCallback.status,303);assert(localCallback.headers.get('Location').startsWith('http://localhost:8000/#ticket='));
+ const localTicket=new URL(localCallback.headers.get('Location')).hash.slice(8);
+ const localExchange=await api('/auth/exchange','POST',{ticket:localTicket,verifier:'a'.repeat(64)});assert(localExchange.token);
  const sync=await worker.fetch(new Request(`https://api.test/api/raids/${id}/discord`,{method:'POST',headers:{Authorization:'Bearer token1'}}),env,{waitUntil(){}});assert.equal(sync.status,200);assert.equal(calls.at(-1).opts.method,'POST');
  await worker.fetch(new Request(`https://api.test/api/raids/${id}/discord`,{method:'POST',headers:{Authorization:'Bearer token1'}}),env,{waitUntil(){}});assert.equal(calls.at(-1).opts.method,'PATCH');assert.deepEqual(JSON.parse(calls.at(-1).opts.body).allowed_mentions,{parse:[]});
  await api('/auth/logout','POST');await api('/me','GET',null,'1',401);
