@@ -17,3 +17,12 @@ dialog:has(#lootForm){width:min(900px,calc(100% - 32px))}
 .notification-fields{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
 .notification-fields select{width:auto;max-width:100%}
 #submitNotify:disabled{cursor:not-allowed}
+.roster-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:24px 0 12px}
+.roster-toolbar h3{margin:0;margin-right:8px}
+.roster-toolbar .check-label,.roster-table .check-label{margin:0;white-space:nowrap}
+.roster-toolbar #rosterCount{font-size:14px;color:var(--muted);white-space:nowrap}
+.roster-toolbar #saveRoster{margin-left:auto;border-radius:8px;font-size:14px}
+.roster-table td{vertical-align:middle}
+.roster-table .roster-operation{width:110px;text-align:right;white-space:nowrap}
+.roster-table .transfer-owner{padding:7px 10px;font-size:13px;border-radius:6px}
+@media(max-width:520px){.roster-toolbar h3{flex-basis:100%}.roster-toolbar #saveRoster{padding:8px 10px}.roster-table{min-width:650px}}
