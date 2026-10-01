@@ -2,6 +2,7 @@
   "name": "maple-api",
   "main": "worker.js",
   "compatibility_date": "2026-08-01",
+  "triggers": {"crons":["* * * * *"]},
   "vars": {
     "PUBLIC_API_URL": "https://maple-api.z860415.workers.dev",
     "FRONTEND_URL": "https://z860415.github.io/Maple/"

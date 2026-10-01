@@ -7,7 +7,7 @@ import {digest} from '../worker.js';
 const root=resolve('.'),url='https://api.test';let dom;const stderr='';
 const pause=()=>new Promise(r=>setTimeout(r,25));
 async function until(test,label){for(let i=0;i<200;i++){if(await test())return;await pause()}throw Error('Timed out: '+label+' '+dom?.window.document.querySelector('#notice').textContent)}
-const mf=new Miniflare({modules:true,scriptPath:'worker.js',compatibilityDate:'2026-08-01',d1Databases:['DB'],bindings:{FRONTEND_URL:'https://z860415.github.io/Maple/'}});
+const mf=new Miniflare({modules:true,scriptPath:'worker.js',compatibilityDate:'2026-08-01',d1Databases:['DB'],bindings:{FRONTEND_URL:'https://z860415.github.io/Maple/',DISCORD_BOT_TOKEN:'mock-bot',DISCORD_NOTIFICATION_CHANNEL_ID:'555'}});
 try{
 const db=await mf.getD1Database('DB');await db.exec(readFileSync('schema.sql','utf8').replace(/CREATE TRIGGER[\s\S]*?END;/,m=>m.replace(/\n/g,' ')));
 await db.prepare("INSERT INTO users(id,name) VALUES('1','測試玩家')").run();await db.prepare('INSERT INTO sessions VALUES(?,?,?)').bind(await digest('ui-token'),'1',Date.now()+1000000).run();
@@ -85,6 +85,16 @@ await db.prepare("INSERT INTO users(id,name) VALUES('1','測試玩家')").run();
  assert.equal((await db.prepare('SELECT owner FROM raids WHERE id=?').bind(originalId).first()).owner,'2');
  click('#historyButton');await until(()=>d.querySelector('#modalTitle').textContent==='參團紀錄','history');
  assert.match(d.querySelector('#modalBody').textContent,/介面測試員/);assert.match(d.querySelector('#modalBody').textContent,/分身主教/);click('#closeModal');
+ click('#notify-meeting');await until(()=>d.querySelector('#notificationForm'),'notification template loaded');
+ assert.match(d.querySelector('[name=template]').value,/集合提醒/);
+ fill('[name=template]','自訂通知 {團名} {剩餘時間}');
+ fill('[name=mode]','scheduled');d.querySelector('[name=mode]').dispatchEvent(new w.Event('change'));fill('[name=minutes]',10);
+ assert.match(d.querySelector('#notifyPreview').value,/自訂通知 分身複製團 10 分鐘/);
+ submit('#notificationForm');await until(closed,'notification schedule saved');
+ assert.equal((await db.prepare("SELECT minutes FROM notifications WHERE status='pending'").first()).minutes,10);
+ click('#notify-meeting');await until(()=>d.querySelector('[data-cancel-notify]'),'notification schedule loaded');
+ assert.equal(d.querySelector('[name=template]').value,'自訂通知 {團名} {剩餘時間}');
+ click('[data-cancel-notify]');await until(()=>!d.querySelector('[data-cancel-notify]'),'notification schedule cancelled');click('#closeModal');
  click('#start');await until(()=>d.querySelector('.attend'),'started');
  assert.equal(d.querySelector('#saveAttendance'),null);
  click('.attend');await until(()=>d.querySelector('#notice').textContent==='出席狀態已儲存','attendance saved');

@@ -1,0 +1,73 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {Miniflare} from 'miniflare';
+import worker,{digest,runNotifications} from '../worker.js';
+test('bot notification permissions, templates, mentions, schedule, payout and uncertain delivery',async()=>{
+ const mf=new Miniflare({modules:true,scriptPath:'worker.js',compatibilityDate:'2026-08-01',d1Databases:['DB']});
+ try{
+  const db=await mf.getD1Database('DB');
+  await db.exec((await readFile('schema.sql','utf8')).replace(/CREATE TRIGGER[\s\S]*?END;/,m=>m.replace(/\n/g,' ')));
+  for(const id of ['101','102','103','104']){
+   await db.prepare('INSERT INTO users(id,name,profile) VALUES(?,?,?)').bind(id,'玩家'+id,JSON.stringify({name:'角色'+id,job:'主教',level:180,attack:100,boss:0,ignore:0})).run();
+   await db.prepare('INSERT INTO sessions VALUES(?,?,0)').bind(await digest('token'+id),id).run();
+  }
+  const calls=[],env={DB:db,FRONTEND_URL:'https://guild.test/',DISCORD_BOT_TOKEN:'mock-bot',DISCORD_NOTIFICATION_CHANNEL_ID:'555',TEST_FETCH:async(url,options)=>{calls.push({url,options});return Response.json({id:'777'})}};
+  async function api(path,method='GET',data,user='101',expected=200){
+   const response=await worker.fetch(new Request('https://api.test/api'+path,{method,headers:{Authorization:'Bearer token'+user,'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined}),env,{waitUntil(){}});
+   const out=await response.json();assert.equal(response.status,expected,JSON.stringify(out));return out;
+  }
+  const raid=await api('/raids','POST',{title:'通知王團',bosses:['炎魔'],starts:new Date(Date.now()+3600000).toISOString(),capacity:3});
+  await api('/raids/'+raid.id+'/join','POST',{},'102');await api('/raids/'+raid.id+'/join','POST',{},'103');await api('/raids/'+raid.id+'/join','POST',{},'104');
+  const route='/raids/'+raid.id+'/notifications';
+  await api(route,'GET',null,'102',403);
+  const templates=(await api(route)).templates;
+  const sent=await api(route,'POST',{kind:'meeting',mode:'manual',template:templates.meeting+'\n@everyone <@104>'});
+  assert.equal(sent.status,'sent');
+  const payload=JSON.parse(calls[0].options.body);
+  assert.deepEqual(payload.allowed_mentions,{parse:[],users:['102','103']});assert.match(payload.content,/通知王團/);assert.match(payload.content,/60 分鐘/);
+  assert.equal(calls[0].options.headers.Authorization,'Bot mock-bot');
+  await api(route,'POST',{kind:'meeting',mode:'manual',template:templates.meeting},'101',429);
+  await api(route,'POST',{kind:'payout',mode:'manual',template:templates.payout},'101',409);
+  const scheduled=await api(route,'POST',{kind:'meeting',mode:'scheduled',minutes:15,template:'自訂提醒 {團名} {剩餘時間}'});
+  await runNotifications(env);assert.equal(calls.length,1);
+  let data=JSON.parse((await db.prepare('SELECT data FROM raids WHERE id=?').bind(raid.id).first()).data);
+  data={...data,title:'修改後王團',starts:new Date(Date.now()+5*60000).toISOString()};
+  await db.prepare('UPDATE raids SET data=? WHERE id=?').bind(JSON.stringify(data),raid.id).run();
+  await runNotifications(env);await runNotifications(env);
+  assert.equal(calls.length,2);assert.match(JSON.parse(calls[1].options.body).content,/自訂提醒 修改後王團 5 分鐘/);
+  assert.equal((await db.prepare('SELECT status FROM notifications WHERE id=?').bind(scheduled.id).first()).status,'sent');
+  await db.prepare("UPDATE raids SET status='done' WHERE id=?").bind(raid.id).run();
+  await db.prepare('INSERT INTO settlements VALUES(?,?)').bind(raid.id,JSON.stringify({input:{rate:9000,items:[{name:'混沌卷軸',quantity:2,price:1000000}],costs:[{name:'天氣',quantity:2,points:900,basis:'points'},{name:'剪刀',quantity:3,mesos:50000,basis:'mesos'}]},result:{users:['101','102','103'],each:123456,count:3,gross:2000000,fee:60000,cost:1050000,total:890000,remainder:2}})).run();
+  await db.prepare('UPDATE signups SET paid=1 WHERE raid_id=? AND user_id=?').bind(raid.id,'103').run();
+  await db.prepare('UPDATE notifications SET created=?').bind(Date.now()-61000).run();
+  await api(route,'POST',{kind:'payout',mode:'manual',template:templates.payout});
+  const payout=JSON.parse(calls.at(-1).options.body);assert.deepEqual(payout.allowed_mentions.users,['102']);assert.match(payout.content,/123,456/);
+  assert.match(payout.content,/混沌卷軸 × 2｜單價 1,000,000 楓幣｜總售價 2,000,000 楓幣/);
+  assert.match(payout.content,/天氣 × 2｜900 楓點（折合 1,000,000 楓幣）/);
+  assert.match(payout.content,/剪刀 × 3｜50,000 楓幣/);
+  assert.match(payout.content,/3 人均分，每人可領：123,456 楓幣/);
+  assert.match(payout.content,/成本合計：1,050,000 楓幣/);
+  assert.equal((await api(route)).values['分寶金額'],'123,456');
+  await db.prepare('UPDATE notifications SET created=?').bind(Date.now()-61000).run();
+  env.TEST_FETCH=async()=>{throw Error('timeout')};
+  await api(route,'POST',{kind:'payout',mode:'manual',template:templates.payout},'101',502);
+  assert.equal((await api(route)).records[0].status,'unknown');
+  await runNotifications(env);assert.equal((await api(route)).records[0].status,'unknown');
+  await db.prepare("UPDATE raids SET status='open' WHERE id=?").bind(raid.id).run();
+  data.starts=new Date(Date.now()+3600000).toISOString();await db.prepare('UPDATE raids SET data=? WHERE id=?').bind(JSON.stringify(data),raid.id).run();
+  const cancel=await api(route,'POST',{kind:'meeting',mode:'scheduled',minutes:15,template:templates.meeting});
+  await api(route+'/'+cancel.id,'DELETE');assert.equal((await api(route)).records[0].status,'cancelled');
+  const cancelledRaid=await api(route,'POST',{kind:'meeting',mode:'scheduled',minutes:10,template:templates.meeting});
+  await db.prepare("UPDATE raids SET status='cancelled' WHERE id=?").bind(raid.id).run();
+  await runNotifications(env);assert.equal((await db.prepare('SELECT status FROM notifications WHERE id=?').bind(cancelledRaid.id).first()).status,'cancelled');
+  await db.prepare("UPDATE raids SET status='done' WHERE id=?").bind(raid.id).run();
+  await db.prepare('UPDATE notifications SET created=?').bind(Date.now()-61000).run();
+  let retries=0;env.TEST_FETCH=async()=>++retries===1?Response.json({retry_after:1},{status:429}):Response.json({id:'888'});
+  const rateLimited=await api(route,'POST',{kind:'payout',mode:'manual',template:templates.payout});
+  assert.equal(rateLimited.status,'pending');
+  await runNotifications(env);assert.equal(retries,1);
+  await db.prepare('UPDATE notifications SET retry_after=0 WHERE id=?').bind(rateLimited.id).run();
+  await runNotifications(env);assert.equal(retries,2);assert.equal((await db.prepare('SELECT status FROM notifications WHERE id=?').bind(rateLimited.id).first()).status,'sent');
+ }finally{await mf.dispose()}
+});

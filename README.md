@@ -58,6 +58,19 @@ GitHub → Maple → Settings → Pages → Build and deployment → Source 選 
 
 ## Discord 招募公告（選用）
 
+### Bot 集合與分寶通知
+
+Cloudflare Secret 設定 `DISCORD_BOT_TOKEN`，公開變數設定 `DISCORD_NOTIFICATION_CHANNEL_ID`。Bot 在指定文字頻道需要查看頻道、傳送訊息、嵌入連結權限。
+
+現有 D1 先執行 `migrations/002_notifications.sql`，再部署最新 `worker.js` 與前端。若使用 Dashboard 部署，另至 Worker → Settings → Triggers / Cron Triggers 新增 `* * * * *`（每分鐘）。命令列部署使用 `wrangler.jsonc` 內的 triggers。排程通常在設定時間後一分鐘內觸發，不保證秒級準時。
+
+- 團長點「集合通知」或「分寶通知」先編輯預設文案與預覽，再發送；可插入團名、剩餘時間、時間、地點、打王項目、分寶金額與團隊連結。
+- 集合通知標記目前正取隊友；分寶通知標記結算名單中尚未領取者。兩者都排除團長本人與候補，僅允許這些帳號被標記。
+- 招募中可設定集合前 1–10080 分鐘自動通知，一團保留一筆待發自動提醒；重新設定會取代舊提醒。修改集合時間後提醒會跟著調整，團隊開始、取消、完成或錯過集合時間後取消待發提醒。
+- 手動通知一團每分鐘最多一筆，避免連點洗版。通知紀錄可查看狀態並取消待發提醒。
+- Discord 限流時排程會延後重試；網路逾時或伺服器錯誤導致結果不明時不自動重發，先查看頻道避免重複通知。
+- 本機前端也可操作通知，訊息由線上 Worker 發送。測試使用模擬 Bot 回應，不會發送真實 Discord 訊息。
+
 若要在你管理的 Discord 頻道公告，另外建立頻道 Webhook，並將 URL 存為 Worker Secret `DISCORD_WEBHOOK_URL`。
 未設定時網站隱藏「同步至 Discord」；仍可複製招募文字自行貼上。
 首次公告只在團長按同步按鈕時發送，其後報名與團隊變更會嘗試更新同一則訊息。訊息不會觸發 mentions。
