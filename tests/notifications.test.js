@@ -20,6 +20,7 @@ test('bot notification permissions, templates, mentions, schedule, payout and un
   const raid=await api('/raids','POST',{title:'通知王團',bosses:['炎魔'],starts:new Date(Date.now()+3600000).toISOString(),capacity:3});
   await api('/raids/'+raid.id+'/join','POST',{},'102');await api('/raids/'+raid.id+'/join','POST',{},'103');await api('/raids/'+raid.id+'/join','POST',{},'104');
   const route='/raids/'+raid.id+'/notifications';
+  await api('/raids/'+raid.id+'/roster','PUT',{users:['101','102','103']});
   await api(route,'GET',null,'102',403);
   const templates=(await api(route)).templates;
   const sent=await api(route,'POST',{kind:'meeting',mode:'manual',template:templates.meeting+'\n@everyone <@104>'});
