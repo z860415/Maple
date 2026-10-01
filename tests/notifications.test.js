@@ -49,6 +49,14 @@ test('bot notification permissions, templates, mentions, schedule, payout and un
   assert.match(payout.content,/3 人均分，每人可領：123,456 楓幣/);
   assert.match(payout.content,/成本合計：1,050,000 楓幣/);
   assert.equal((await api(route)).values['分寶金額'],'123,456');
+  await db.prepare('UPDATE signups SET paid=1 WHERE raid_id=?').bind(raid.id).run();
+  await db.prepare('UPDATE notifications SET created=?').bind(Date.now()-61000).run();
+  const unmentioned=await api(route,'POST',{kind:'payout',mode:'manual',template:templates.payout});
+  assert.equal(unmentioned.status,'sent');
+  const announcement=JSON.parse(calls.at(-1).options.body);
+  assert.deepEqual(announcement.allowed_mentions,{parse:[],users:[]});
+  assert.ok(announcement.content.startsWith('【修改後王團】'));
+  assert.doesNotMatch(announcement.content,/<@/);
   await db.prepare('UPDATE notifications SET created=?').bind(Date.now()-61000).run();
   env.TEST_FETCH=async()=>{throw Error('timeout')};
   await api(route,'POST',{kind:'payout',mode:'manual',template:templates.payout},'101',502);

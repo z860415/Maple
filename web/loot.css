@@ -16,3 +16,4 @@ dialog:has(#lootForm){width:min(900px,calc(100% - 32px))}
 .loot-presets button span{font-size:15px}
 .notification-fields{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
 .notification-fields select{width:auto;max-width:100%}
+#submitNotify:disabled{cursor:not-allowed}

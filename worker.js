@@ -119,7 +119,7 @@ if(op==='attendance'&&method==='PUT'){if(!['running','done'].includes(r.status)|
 }
 export const notificationReady=e=>!!(e.DISCORD_BOT_TOKEN&&/^\d+$/.test(e.DISCORD_NOTIFICATION_CHANNEL_ID||''));
 export function notificationTemplate(kind){
- return kind==='meeting'?'【{團名}】集合提醒\n距離集合：{剩餘時間}\n集合時間：{集合時間}\n集合地點：{集合地點}\n打王項目：{打王項目}\n請準備集合！\n{團隊連結}':'【{團名}】分寶通知\n\n戰利品收益：\n{戰利品明細}\n\n成本扣除（各筆總額）：\n{成本明細}\n\n總售價：{總售價} 楓幣\n手續費：{手續費} 楓幣\n成本合計：{成本合計} 楓幣\n可分配收益：{淨收益} 楓幣\n{分寶人數} 人均分，每人可領：{分寶金額} 楓幣\n餘額：{分寶餘額} 楓幣\n請聯繫團長領取分寶。\n{團隊連結}';
+ return kind==='meeting'?'【{團名}】集合提醒\n距離集合：{剩餘時間}\n集合時間：{集合時間}\n集合地點：{集合地點}\n打王項目：{打王項目}\n請準備集合！\n{團隊連結}':'【{團名}】分寶通知\n\n戰利品收益：\n{戰利品明細}\n\n成本扣除（各筆總額）：\n{成本明細}\n\n總售價：{總售價} 楓幣\n手續費：{手續費} 楓幣\n成本合計：{成本合計} 楓幣\n可分配收益：{淨收益} 楓幣\n{分寶人數} 人均分，每人可領：{分寶金額} 楓幣\n請聯繫團長領取分寶。\n{團隊連結}';
 }
 export function notificationSettlementValues(settlement){
  const input=settlement?.input||{},result=settlement?.result||{},fmt=value=>Number(value||0).toLocaleString('zh-TW',{maximumFractionDigits:8});
@@ -137,7 +137,7 @@ export function notificationContent(e,raid,kind,template){
  const minutes=Math.ceil((Date.parse(raid.starts)-Date.now())/60000);
  const values={'團名':raid.title,'剩餘時間':minutes>0?minutes+' 分鐘':'已到集合時間','集合時間':new Date(raid.starts).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}),'集合地點':raid.location,'打王項目':raid.bosses.join(' / '),'分寶金額':Number(raid.settlement?.result.each||0).toLocaleString('zh-TW'),'團隊連結':e.FRONTEND_URL.split('#')[0]+'#raid='+raid.id};
  Object.assign(values,notificationSettlementValues(raid.settlement));
- const content=recipients.map(id=>'<@'+id+'>').join(' ')+'\n'+template.replace(/\{([^{}]+)\}/g,(match,key)=>values[key]??match);
+ const content=(recipients.length?recipients.map(id=>'<@'+id+'>').join(' ')+'\n':'')+template.replace(/\{([^{}]+)\}/g,(match,key)=>values[key]??match);
  if(content.length>2000)fail(400,'通知文字過長，請縮短文案');
  return {content,allowed_mentions:{parse:[],users:recipients},recipients};
 }
@@ -154,7 +154,6 @@ export async function sendNotification(e,id){
   }
   if(job.mode==='scheduled'&&Date.parse(raid.starts)-job.minutes*60000>Date.now()){await q("UPDATE notifications SET status='pending',updated=? WHERE id=?",Date.now(),id).run();return {status:'pending'}}
   const payload=notificationContent(e,raid,job.kind,job.template);
-  if(!payload.recipients.length){await q("UPDATE notifications SET status='skipped',error='沒有需要通知的成員',updated=? WHERE id=?",Date.now(),id).run();return {status:'skipped'}}
   sending=true;
   const response=await (e.TEST_FETCH||fetch)('https://discord.com/api/v10/channels/'+e.DISCORD_NOTIFICATION_CHANNEL_ID+'/messages',{method:'POST',headers:{Authorization:'Bot '+e.DISCORD_BOT_TOKEN,'Content-Type':'application/json'},body:JSON.stringify({content:payload.content,allowed_mentions:payload.allowed_mentions}),signal:AbortSignal.timeout(15000)});
   if(response.status===429){
