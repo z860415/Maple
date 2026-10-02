@@ -22,7 +22,7 @@ dialog:has(#lootForm){width:min(900px,calc(100% - 32px))}
 .roster-toolbar .check-label,.roster-table .check-label{margin:0;white-space:nowrap}
 .roster-toolbar #rosterCount{font-size:14px;color:var(--muted);white-space:nowrap}
 .roster-toolbar #saveRoster{margin-left:auto;border-radius:8px;font-size:14px}
-.roster-table{min-width:920px}
+.roster-table{min-width:880px}
 .roster-table td{vertical-align:middle;white-space:nowrap}
 .roster-table th,.roster-table td{text-align:left}
 .roster-table .roster-number{font-variant-numeric:tabular-nums}
@@ -40,3 +40,6 @@ dialog:has(#lootForm){width:min(900px,calc(100% - 32px))}
 .split-members{max-height:45vh;overflow:auto;border-top:1px solid var(--line)}
 .split-members .check-label{padding:12px 0;margin:0;border-bottom:1px solid var(--line)}
 .split-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px}
+#detail .actions #cancel{margin-left:auto}
+@media(min-width:1100px){.board{grid-template-columns:minmax(220px,260px) minmax(0,1fr);gap:20px}.detail{padding:24px}.raid-card{padding:18px}.raid-card h2{overflow-wrap:anywhere}}
+@media(min-width:851px) and (max-width:1099px){.board{grid-template-columns:1fr}.raid-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
