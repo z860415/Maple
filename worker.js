@@ -6,7 +6,8 @@ const random=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toSt
 export const digest=async s=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))),b=>b.toString(16).padStart(2,'0')).join('');
 const text=(v,max,min=0)=>{if(typeof v!=='string'||v.trim().length<min||v.length>max)fail(400,'文字欄位格式有誤');return v.trim()};
 const num=(v,min,max,integer=true)=>{if(typeof v!=='number'||!Number.isFinite(v)||v<min||v>max||(integer&&!Number.isSafeInteger(v)))fail(400,'數值欄位超出範圍');return v};
-function profile(p){return {name:text(p.name,32,1),job:text(p.job,24,1),level:num(p.level,1,300),attack:num(p.attack,0,1e9),boss:num(p.boss,0,5000,false),ignore:num(p.ignore,0,100,false)}}
+function dojoScore(value){if(value==null||value==='')return '';if(typeof value!=='string'||!/^\d{1,6}(?:\.\d{1,6})?[eE]?$/.test(value.trim()))fail(400,'武陵分數請填例如 1.5E 或 0.23E（億）');return Number(value.trim().replace(/[eE]$/,''))+'E'}
+function profile(p){return {name:text(p.name,32,1),job:text(p.job,24,1),level:num(p.level,1,300),attack:num(p.attack,0,1e9),boss:num(p.boss,0,5000,false),ignore:num(p.ignore,0,100,false),dojo:dojoScore(p.dojo)}}
 function raidInput(p){if(!Array.isArray(p.bosses)||!p.bosses.length||p.bosses.length>10)fail(400,'請選擇打王項目');if(typeof p.starts!=='string'||!/(Z|[+-]\d\d:\d\d)$/.test(p.starts)||!Number.isFinite(Date.parse(p.starts)))fail(400,'集合時間必須包含時區');return {title:text(p.title,80,1),bosses:p.bosses.map(b=>text(b,40,1)),starts:p.starts,location:text(p.location??'當天公告',100),capacity:num(p.capacity,1,60),requirements:text(p.requirements??'',1000),note:text(p.note??'',1000)}}
 export function calculate(p,users){
  num(p.fee,0,100,false);num(p.rate,1,1e9);if(!Array.isArray(p.items)||!Array.isArray(p.costs)||p.items.length>100||p.costs.length>100)fail(400,'項目過多');
@@ -86,15 +87,33 @@ if(path==='/api/me/history'&&method==='GET')return json((await all('SELECT raids
  return json(rows.map(r=>({...JSON.parse(r.data),id:r.id,owner:r.owner,status:r.status,sync_error:r.sync_error,members:ms.filter(m=>m.raid_id===r.id).map(m=>({...m,profile:JSON.parse(m.profile)})),settlement:JSON.parse(ss.find(s=>s.raid_id===r.id)?.data||'null')})));
  }
  if(path==='/api/raids'&&method==='POST'){const input=await body(),snapshot=await selectedProfile(input),p=raidInput(input);if(Date.parse(p.starts)<=now())fail(400,'開團時間必須在未來');const results=await db.batch([q('INSERT INTO raids(owner,data) VALUES(?,?) RETURNING id',u.id,JSON.stringify(p)),q('UPDATE signups SET profile=? WHERE raid_id=last_insert_rowid() AND user_id=?',snapshot,u.id)]);return json(results[0].results[0])}
- const match=path.match(/^\/api\/raids\/(\d+)(?:\/(join|roster|owner|status|attendance|settlement|discord|paid|notifications)(?:\/(\d+))?)?$/);if(!match)fail(404,'找不到此功能');
+ const match=path.match(/^\/api\/raids\/(\d+)(?:\/(join|roster|split|owner|payout-owner|status|attendance|settlement|discord|paid|notifications)(?:\/(\d+))?)?$/);if(!match)fail(404,'找不到此功能');
  const id=Number(match[1]),op=match[2],uid=match[3],r=await detail(id),members=r.members;
  const leader=()=>{if(r.owner!==u.id)fail(403,'只有團長能操作')};
- async function mutate(statements){try{await db.batch([q('UPDATE raids SET version=version+1 WHERE id=? AND version=?',id,r.version),q('INSERT INTO mutation_guard(value) VALUES(changes())'),q('DELETE FROM mutation_guard'),...statements])}catch(err){if(String(err.message).includes('CHECK constraint'))fail(409,'團隊資料剛被更新，請重新整理再操作');throw err}}
+ async function mutate(statements){try{return await db.batch([q('UPDATE raids SET version=version+1 WHERE id=? AND version=?',id,r.version),q('INSERT INTO mutation_guard(value) VALUES(changes())'),q('DELETE FROM mutation_guard'),...statements])}catch(err){if(String(err.message).includes('CHECK constraint'))fail(409,'團隊資料剛被更新，請重新整理再操作');throw err}}
  const refresh=()=>{if(e.DISCORD_WEBHOOK_URL&&r.message_id)ctx.waitUntil(publish(true).catch(()=>{}))};
- if(!op&&method==='PUT'){leader();if(r.status!=='open')fail(409,'只有招募中的團能修改');const p=raidInput(await body());if(p.capacity<members.filter(m=>m.seat==='confirmed').length)fail(409,'人數不可少於現有正選');await mutate([q('UPDATE raids SET data=? WHERE id=?',JSON.stringify(p),id)]);refresh();return json({ok:true})}
+ if(!op&&method==='PUT'){leader();if(r.status!=='open')fail(409,'只有招募中的團能修改');const p=raidInput(await body());if(p.capacity<members.filter(m=>m.seat==='confirmed').length)fail(409,'人數不可少於現有正選');await mutate([q('UPDATE raids SET data=? WHERE id=?',JSON.stringify({...p,payout_owner:r.payout_owner||null}),id)]);refresh();return json({ok:true})}
  if(op==='join'&&method==='POST'){if(r.status!=='open')fail(409,'此團已停止報名');if(members.some(m=>m.user_id===u.id))fail(409,'你已經報名此團');const p=await body(),snapshot=await selectedProfile(p),seat='waiting';await mutate([q('INSERT INTO signups(raid_id,user_id,profile,note,available,seat,joined) VALUES(?,?,?,?,?,?,?)',id,u.id,snapshot,text(p.note??'',500),text(p.available??'',100),seat,now())]);refresh();return json({seat})}
- if(op==='join'&&method==='DELETE'){if(r.status!=='open'||r.owner===u.id)fail(409,'無法退出；團長請使用取消團隊');await mutate([q('DELETE FROM signups WHERE raid_id=? AND user_id=?',id,u.id)]);refresh();return json({ok:true})}
- leader();
+ if(op==='join'&&method==='DELETE'){if(r.status!=='open'||r.owner===u.id)fail(409,'無法退出；團長請使用取消團隊');await mutate([q('DELETE FROM signups WHERE raid_id=? AND user_id=?',id,u.id),q("UPDATE raids SET data=json_remove(data,'$.payout_owner') WHERE id=? AND json_extract(data,'$.payout_owner')=?",id,u.id)]);refresh();return json({ok:true})}
+ const payoutOwner=r.payout_owner||r.owner;
+ if(op==='notifications'&&u.id!==r.owner){if(u.id!==payoutOwner)leader();if(method==='POST'){const p=await body();if(p.kind!=='payout')fail(403,'分寶人員只能發送分寶通知');return json(await handleNotifications(req,e,r,uid,async()=>p))}if(method==='GET')return json(await handleNotifications(req,e,r,uid,body));leader()}
+ if(!(['settlement','paid'].includes(op)&&u.id===payoutOwner))leader();
+ if(op==='payout-owner'&&method==='PUT'){
+  if(r.status==='cancelled')fail(409,'已取消的團不能指派分寶人員');
+  const p=await body();if(!members.some(m=>m.user_id===p.user_id))fail(400,'請選擇已報名成員');
+  await mutate([q("UPDATE raids SET data=json_set(data,'$.payout_owner',?) WHERE id=?",p.user_id===r.owner?null:p.user_id,id)]);return json({ok:true});
+ }
+ if(op==='split'&&method==='POST'){
+  if(r.status!=='open')fail(409,'只有招募中的團能建立分隊');
+  const input=await body(),p=raidInput(input),users=input.users;
+  if(!Array.isArray(users)||!users.length||users.length>60||new Set(users).size!==users.length||users.some(user=>!members.some(m=>m.user_id===user&&m.seat==='waiting'&&m.user_id!==r.owner)))fail(400,'只能移動已報名的備選成員');
+  if(!users.includes(input.owner))fail(400,'新團長必須是勾選的成員');
+  if(users.length>p.capacity)fail(400,'新團人數上限不能少於移動人數');
+  if(Date.parse(p.starts)<=now())fail(400,'開團時間必須在未來');
+  // The raid insert's row ID remains available throughout this atomic batch.
+  const results=await mutate([q('INSERT INTO raids(owner,data) VALUES(?,?) RETURNING id',input.owner,JSON.stringify(p)),q('DELETE FROM signups WHERE raid_id=last_insert_rowid()'),q("UPDATE signups SET raid_id=last_insert_rowid(),seat='confirmed',attended=0,paid=0 WHERE raid_id=? AND user_id IN (SELECT value FROM json_each(?))",id,JSON.stringify(users)),q("UPDATE raids SET data=json_remove(data,'$.payout_owner') WHERE id=? AND json_extract(data,'$.payout_owner') IN (SELECT value FROM json_each(?))",id,JSON.stringify(users))]);
+  refresh();return json(results[3].results[0]);
+ }
  if(op==='owner'&&method==='PUT'){
   if(r.status==='cancelled')fail(409,'已取消的團不能轉移團長');
   const p=await body(),target=members.find(m=>m.user_id===p.user_id);
@@ -127,12 +146,13 @@ if(op==='attendance'&&method==='PUT'){if(!['running','done'].includes(r.status)|
 }
 export const notificationReady=e=>!!(e.DISCORD_BOT_TOKEN&&/^\d+$/.test(e.DISCORD_NOTIFICATION_CHANNEL_ID||''));
 export function notificationTemplate(kind){
- return kind==='meeting'?'【{團名}】集合提醒\n距離集合：{剩餘時間}\n集合時間：{集合時間}\n集合地點：{集合地點}\n打王項目：{打王項目}\n請準備集合！\n{團隊連結}':'【{團名}】分寶通知\n\n戰利品收益：\n{戰利品明細}\n\n成本扣除（各筆總額）：\n{成本明細}\n\n總售價：{總售價} 楓幣\n手續費：{手續費} 楓幣\n成本合計：{成本合計} 楓幣\n可分配收益：{淨收益} 楓幣\n{分寶人數} 人均分，每人可領：{分寶金額} 楓幣\n請聯繫團長領取分寶。\n{團隊連結}';
+ return kind==='meeting'?'【{團名}】集合提醒\n距離集合：{剩餘時間}\n集合時間：{集合時間}\n集合地點：{集合地點}\n打王項目：{打王項目}\n請準備集合！\n{團隊連結}':'【{團名}】分寶通知\n\n戰利品收益：\n{戰利品明細}\n\n成本扣除（各筆總額）：\n{成本明細}\n\n總售價：{總售價} 楓幣\n手續費：{手續費} 楓幣\n成本合計：{成本合計} 楓幣\n可分配收益：{淨收益} 楓幣\n{分寶人數} 人均分，每人可領：{分寶金額} 楓幣\n請聯繫 {分寶人員} 領取分寶。\n{團隊連結}';
 }
 export function notificationSettlementValues(settlement){
  const input=settlement?.input||{},result=settlement?.result||{},fmt=value=>Number(value||0).toLocaleString('zh-TW',{maximumFractionDigits:8});
  return {'戰利品明細':(input.items||[]).map(item=>`${item.name} × ${fmt(item.quantity)}｜單價 ${fmt(item.price)} 楓幣｜總售價 ${fmt(item.quantity*item.price)} 楓幣`).join('\n')||'無','成本明細':(input.costs||[]).map(cost=>`${cost.name} × ${fmt(cost.quantity)}｜${cost.basis==='mesos'?fmt(cost.mesos)+' 楓幣':fmt(cost.points)+' 楓點（折合 '+fmt(Number(cost.points)*10000000/Number(input.rate))+' 楓幣）'}`).join('\n')||'無','總售價':fmt(result.gross),'手續費':fmt(result.fee),'成本合計':fmt(result.cost),'淨收益':fmt(result.total),'分寶人數':fmt(result.count),'分寶金額':fmt(result.each),'分寶餘額':fmt(result.remainder)};
 }
+export function notificationPayoutName(raid){const member=raid.members.find(m=>m.user_id===(raid.payout_owner||raid.owner));const profile=typeof member?.profile==='string'?JSON.parse(member.profile):member?.profile;return profile?.name||'團長'}
 export async function notificationRaid(e,id){
  const db=e.DB,r=await db.prepare('SELECT * FROM raids WHERE id=?').bind(id).first();
  if(!r)return null;
@@ -145,6 +165,7 @@ export function notificationContent(e,raid,kind,template){
  const minutes=Math.ceil((Date.parse(raid.starts)-Date.now())/60000);
  const values={'團名':raid.title,'剩餘時間':minutes>0?minutes+' 分鐘':'已到集合時間','集合時間':new Date(raid.starts).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}),'集合地點':raid.location,'打王項目':raid.bosses.join(' / '),'分寶金額':Number(raid.settlement?.result.each||0).toLocaleString('zh-TW'),'團隊連結':e.FRONTEND_URL.split('#')[0]+'#raid='+raid.id};
  Object.assign(values,notificationSettlementValues(raid.settlement));
+ values['分寶人員']=notificationPayoutName(raid);
  const content=(recipients.length?recipients.map(id=>'<@'+id+'>').join(' ')+'\n':'')+template.replace(/\{([^{}]+)\}/g,(match,key)=>values[key]??match);
  if(content.length>2000)fail(400,'通知文字過長，請縮短文案');
  return {content,allowed_mentions:{parse:[],users:recipients},recipients};
@@ -180,7 +201,7 @@ export async function sendNotification(e,id){
 export async function handleNotifications(req,e,raid,notificationId,body){
  if(!notificationReady(e))fail(503,'尚未設定 Discord Bot 與通知頻道');
  const q=(sql,...args)=>e.DB.prepare(sql).bind(...args);
- if(req.method==='GET')return {records:(await q('SELECT * FROM notifications WHERE raid_id=? ORDER BY id DESC LIMIT 20',raid.id).all()).results,values:notificationSettlementValues(raid.settlement),templates:{meeting:notificationTemplate('meeting'),payout:notificationTemplate('payout')}};
+ if(req.method==='GET')return {records:(await q('SELECT * FROM notifications WHERE raid_id=? ORDER BY id DESC LIMIT 20',raid.id).all()).results,values:{...notificationSettlementValues(raid.settlement),'分寶人員':notificationPayoutName(raid)},templates:{meeting:notificationTemplate('meeting'),payout:notificationTemplate('payout')}};
  if(req.method==='DELETE'){
   const result=await q("UPDATE notifications SET status='cancelled',updated=? WHERE id=? AND raid_id=? AND status='pending' RETURNING id",Date.now(),notificationId,raid.id).first();
   if(!result)fail(409,'此通知已發送或正在發送，無法取消');return {ok:true};
