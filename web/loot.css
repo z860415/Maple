@@ -38,7 +38,10 @@ dialog:has(#lootForm){width:min(900px,calc(100% - 32px))}
 @media(max-width:520px){#toast{top:12px;right:12px;max-width:calc(100vw - 24px)}}
 #assignPayout{margin-left:10px;padding:6px 9px;border-radius:6px;font-size:13px}
 .split-members{max-height:45vh;overflow:auto;border-top:1px solid var(--line)}
-.split-members .check-label{padding:12px 0;margin:0;border-bottom:1px solid var(--line)}
+dialog:has(#splitMemberForm){width:min(900px,calc(100% - 32px))}
+.split-member-table{min-width:760px}
+.split-member-table th{position:sticky;top:0;background:#192628;z-index:1}
+.split-member-table td{vertical-align:middle;white-space:nowrap;font-variant-numeric:tabular-nums}
 .split-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px}
 #detail .actions #cancel{margin-left:auto}
 @media(min-width:1100px){.board{grid-template-columns:minmax(220px,260px) minmax(0,1fr);gap:20px}.detail{padding:24px}.raid-card{padding:18px}.raid-card h2{overflow-wrap:anywhere}}
