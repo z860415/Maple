@@ -13,6 +13,10 @@ test('D1: account, raid, waitlist, permission, attendance, payout, concurrency',
  async function api(path,method='GET',data,uid='1',expected=200){const res=await mf.dispatchFetch('https://api.test/api'+path,{method,headers:{Authorization:'Bearer token'+uid,Origin:'https://z860415.github.io',...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined});const out=await res.json();assert.equal(res.status,expected,JSON.stringify(out));assert.equal(res.headers.get('Access-Control-Allow-Origin'),'https://z860415.github.io');return out}
  assert.equal((await api('/config')).login_ready,true);await api('/me/profile','PUT',p);await api('/me','GET',null,'bad',401);
  const input={title:'測試王團',bosses:['炎魔'],starts:new Date(Date.now()+3600000).toISOString(),capacity:2};
+ const presetBosses=['普通炎魔','殘暴炎魔','普通龍王','混沌龍王','凡雷恩','普通皮卡啾','混沌皮卡啾','阿卡伊農','女皇防具','女皇','森蘭丸','小筱','大頭目','蟾蜍'];
+ const presetRaid=await api('/raids','POST',{...input,bosses:presetBosses});
+ assert.deepEqual((await api('/raids')).find(r=>r.id===presetRaid.id).bosses,presetBosses);
+ await api('/raids','POST',{...input,bosses:Array(21).fill('炎魔')},'1',400);
  const alt=await api('/me/characters','POST',{...p,name:'小楓分身',job:'主教',dojo:'1.50e',deathSquad:true});
  assert.equal(alt.profile.deathSquad,true);
  await api('/me/characters/'+encodeURIComponent(alt.id),'PUT',{...p,deathSquad:'false'},'1',400);
