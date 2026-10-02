@@ -13,7 +13,9 @@ test('D1: account, raid, waitlist, permission, attendance, payout, concurrency',
  async function api(path,method='GET',data,uid='1',expected=200){const res=await mf.dispatchFetch('https://api.test/api'+path,{method,headers:{Authorization:'Bearer token'+uid,Origin:'https://z860415.github.io',...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined});const out=await res.json();assert.equal(res.status,expected,JSON.stringify(out));assert.equal(res.headers.get('Access-Control-Allow-Origin'),'https://z860415.github.io');return out}
  assert.equal((await api('/config')).login_ready,true);await api('/me/profile','PUT',p);await api('/me','GET',null,'bad',401);
  const input={title:'測試王團',bosses:['炎魔'],starts:new Date(Date.now()+3600000).toISOString(),capacity:2};
- const alt=await api('/me/characters','POST',{...p,name:'小楓分身',job:'主教',dojo:'1.50e'});
+ const alt=await api('/me/characters','POST',{...p,name:'小楓分身',job:'主教',dojo:'1.50e',deathSquad:true});
+ assert.equal(alt.profile.deathSquad,true);
+ await api('/me/characters/'+encodeURIComponent(alt.id),'PUT',{...p,deathSquad:'false'},'1',400);
  assert.equal(alt.profile.dojo,'1.5E');
  for(const dojo of ['-1E','1e8','abc','Infinity',1.5])await api('/me/characters/'+encodeURIComponent(alt.id),'PUT',{...p,dojo},'1',400);
  assert.equal((await api('/me')).characters.length,2);
@@ -21,10 +23,12 @@ test('D1: account, raid, waitlist, permission, attendance, payout, concurrency',
  await api('/raids','POST',{...input,character_id:alt.id},'2',400);
  const altRaid=await api('/raids','POST',{...input,character_id:alt.id});
  assert.equal((await api('/raids')).find(r=>r.id===altRaid.id).members[0].profile.name,'小楓分身');
- await api('/me/characters/'+encodeURIComponent(alt.id),'PUT',{...p,name:'分身新名稱',dojo:'0.23'});
+ await api('/me/characters/'+encodeURIComponent(alt.id),'PUT',{...p,name:'分身新名稱',dojo:'0.23',deathSquad:false});
+ assert.equal((await api('/me')).characters.find(c=>c.id===alt.id).profile.deathSquad,false);
  assert.equal((await api('/me')).characters.find(c=>c.id===alt.id).profile.dojo,'0.23E');
  assert.equal((await api('/me/history'))[0].profile.name,'小楓分身');
  assert.equal((await api('/me/history'))[0].profile.dojo,'1.5E');
+ assert.equal((await api('/me/history'))[0].profile.deathSquad,true);
  await api('/me/history','GET',null,'2').then(rows=>assert.equal(rows.length,0));
  const others=await api('/raids','POST',input,'2');
  await api(`/raids/${others.id}/join`,'POST',{character_id:alt.id});
