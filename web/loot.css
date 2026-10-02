@@ -22,7 +22,7 @@ dialog:has(#lootForm){width:min(900px,calc(100% - 32px))}
 .roster-toolbar .check-label,.roster-table .check-label{margin:0;white-space:nowrap}
 .roster-toolbar #rosterCount{font-size:14px;color:var(--muted);white-space:nowrap}
 .roster-toolbar #saveRoster{margin-left:auto;border-radius:8px;font-size:14px}
-.roster-table{min-width:1000px}
+.roster-table{min-width:920px}
 .roster-table td{vertical-align:middle;white-space:nowrap}
 .roster-table .roster-number{text-align:right;font-variant-numeric:tabular-nums}
 .roster-table .check-label{display:inline-flex;vertical-align:middle}
