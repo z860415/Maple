@@ -167,8 +167,11 @@ test('D1: account, raid, waitlist, permission, attendance, payout, concurrency',
  await api('/auth/logout','POST');await api('/me','GET',null,'1',401);
  }finally{await mf.dispose()}
 });
-test('exact fractional fee and cost rounding; safe total bounds',()=>{
+test('integer fee and per-row cost rounding; safe total bounds',()=>{
  const p={fee:0.1,rate:3,items:[{name:'a',quantity:1,price:10000001}],costs:[{name:'b',quantity:99,points:1,mesos:0,basis:'points'}]};
- const r=calculate(p,['1','2']);assert.equal(r.total,6656667);assert.equal(r.each,3328333);assert.equal(r.remainder,1);
+ const r=calculate(p,['1','2']);assert.equal(r.total,6656668);assert.equal(r.each,3328334);assert.equal(r.remainder,0);
+ assert.equal(r.fee,'10000');assert.equal(r.cost,'3333333');assert.equal(r.net,'6656668');
+ const multiple=calculate({...p,fee:0,costs:[...p.costs,...p.costs,...p.costs]},['1']);
+ assert.equal(multiple.cost,'9999999');assert.equal(multiple.gross-Number(multiple.fee)-Number(multiple.cost),multiple.total);
  assert.throws(()=>calculate({...p,items:[{name:'a',quantity:100000,price:1e12}]},['1']));
 });

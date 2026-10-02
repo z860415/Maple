@@ -11,16 +11,16 @@ function profile(p){if(p.deathSquad!==undefined&&typeof p.deathSquad!=='boolean'
 function raidInput(p){if(!Array.isArray(p.bosses)||!p.bosses.length||p.bosses.length>20)fail(400,'請選擇打王項目');if(typeof p.starts!=='string'||!/(Z|[+-]\d\d:\d\d)$/.test(p.starts)||!Number.isFinite(Date.parse(p.starts)))fail(400,'集合時間必須包含時區');return {title:text(p.title,80,1),bosses:p.bosses.map(b=>text(b,40,1)),starts:p.starts,location:text(p.location??'當天公告',100),capacity:num(p.capacity,1,60),requirements:text(p.requirements??'',1000),note:text(p.note??'',1000)}}
 export function calculate(p,users){
  num(p.fee,0,100,false);num(p.rate,1,1e9);if(!Array.isArray(p.items)||!Array.isArray(p.costs)||p.items.length>100||p.costs.length>100)fail(400,'項目過多');
- // Fee precision: up to 4 decimal places. BigInt rational arithmetic avoids payout rounding drift.
+ // Keep percentage precision, but floor every currency deduction using integer arithmetic.
  const fs=Math.round(p.fee*10000);if(Math.abs(fs/10000-p.fee)>1e-10)fail(400,'手續費最多四位小數');
- let gross=0n,cost=0n;const rate=BigInt(p.rate),den=1000000n*rate;
+ let gross=0n,cost=0n;const rate=BigInt(p.rate);
  for(const i of p.items){text(i.name,80,1);gross+=BigInt(num(i.quantity,1,100000))*BigInt(num(i.price,0,1e12))}
- for(const c of p.costs){text(c.name,80,1);num(c.quantity,1,100000);num(c.points,0,1e12);num(c.mesos,0,1e12);if(!['points','mesos'].includes(c.basis))fail(400,'成本換算欄位有誤');cost+=c.basis==='mesos'?BigInt(c.mesos)*rate:BigInt(c.points)*10000000n}
- const fee=gross*BigInt(fs)*rate,net=gross*den-fee-cost*1000000n;
- if(net<0n)fail(400,'本團淨收益為負，請確認售價或成本');const total=net/den;
+ for(const c of p.costs){text(c.name,80,1);num(c.quantity,1,100000);num(c.points,0,1e12);num(c.mesos,0,1e12);if(!['points','mesos'].includes(c.basis))fail(400,'成本換算欄位有誤');cost+=c.basis==='mesos'?BigInt(c.mesos):BigInt(c.points)*10000000n/rate}
+ const fee=gross*BigInt(fs)/1000000n,total=gross-fee-cost;
+ if(total<0n)fail(400,'本團淨收益為負，請確認售價或成本');
  if(gross>BigInt(Number.MAX_SAFE_INTEGER)||total>BigInt(Number.MAX_SAFE_INTEGER))fail(400,'金額過大，請拆分結算');
  if(!users.length)fail(400,'請先確認實際出席名單');const each=total/BigInt(users.length);
- return {gross:Number(gross),fee:String(Number(fee)/Number(den)),cost:String(Number(cost)/Number(rate)),net:String(Number(net)/Number(den)),total:Number(total),count:users.length,each:Number(each),remainder:Number(total-each*BigInt(users.length)),users};
+ return {gross:Number(gross),fee:String(fee),cost:String(cost),net:String(total),total:Number(total),count:users.length,each:Number(each),remainder:Number(total-each*BigInt(users.length)),users};
 }
 const redirect=(url,cookie)=>new Response(null,{status:303,headers:{Location:url,...(cookie?{'Set-Cookie':cookie}:{})}});
 const frontendURLs=e=>[e.FRONTEND_URL,...[8000,8080].flatMap(port=>['localhost','127.0.0.1'].map(host=>`http://${host}:${port}/`))].filter(Boolean);
@@ -149,7 +149,7 @@ export function notificationTemplate(kind){
  return kind==='meeting'?'【{團名}】集合提醒\n距離集合：{剩餘時間}\n集合時間：{集合時間}\n集合地點：{集合地點}\n打王項目：{打王項目}\n請準備集合！\n{團隊連結}':'【{團名}】分寶通知\n\n戰利品收益：\n{戰利品明細}\n\n成本扣除（各筆總額）：\n{成本明細}\n\n總售價：{總售價} 楓幣\n手續費：{手續費} 楓幣\n成本合計：{成本合計} 楓幣\n可分配收益：{淨收益} 楓幣\n{分寶人數} 人均分，每人可領：{分寶金額} 楓幣\n請聯繫 {分寶人員} 領取分寶。\n{團隊連結}';
 }
 export function notificationSettlementValues(settlement){
- const input=settlement?.input||{},result=settlement?.result||{},fmt=value=>Number(value||0).toLocaleString('zh-TW',{maximumFractionDigits:8});
+ const input=settlement?.input||{},result=settlement?.result||{},fmt=value=>Math.floor(Number(value||0)).toLocaleString('zh-TW');
  return {'戰利品明細':(input.items||[]).map(item=>`${item.name} × ${fmt(item.quantity)}｜單價 ${fmt(item.price)} 楓幣｜總售價 ${fmt(item.quantity*item.price)} 楓幣`).join('\n')||'無','成本明細':(input.costs||[]).map(cost=>`${cost.name} × ${fmt(cost.quantity)}｜${cost.basis==='mesos'?fmt(cost.mesos)+' 楓幣':fmt(cost.points)+' 楓點（折合 '+fmt(Number(cost.points)*10000000/Number(input.rate))+' 楓幣）'}`).join('\n')||'無','總售價':fmt(result.gross),'手續費':fmt(result.fee),'成本合計':fmt(result.cost),'淨收益':fmt(result.total),'分寶人數':fmt(result.count),'分寶金額':fmt(result.each),'分寶餘額':fmt(result.remainder)};
 }
 export function notificationPayoutName(raid){const member=raid.members.find(m=>m.user_id===(raid.payout_owner||raid.owner));const profile=typeof member?.profile==='string'?JSON.parse(member.profile):member?.profile;return profile?.name||'團長'}
