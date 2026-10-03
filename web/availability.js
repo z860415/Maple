@@ -1,5 +1,8 @@
 const availabilityState={mode:'weekly',week:'',data:null,members:[],selected:new Set(),dirty:false,loading:false};
-function resetAvailabilityAccount(){const id=state.me?.id||'';if(availabilityState.account===id)return;Object.assign(availabilityState,{account:id,mode:'weekly',data:null,members:[],selected:new Set(),dirty:false});$('#availabilityPage').hidden=true;$('#raidPage').hidden=false;$('.page-top').hidden=false}
+function availabilitySelectionKey(){return 'maple.availability.members.'+(state.me?.id||'')}
+function readAvailabilitySelection(){try{const ids=JSON.parse(localStorage.getItem(availabilitySelectionKey())||'[]');return new Set(Array.isArray(ids)?ids.filter(id=>typeof id==='string'):[])}catch{return new Set()}}
+function saveAvailabilitySelection(){try{localStorage.setItem(availabilitySelectionKey(),JSON.stringify([...availabilityState.selected]))}catch{}}
+function resetAvailabilityAccount(){const id=state.me?.id||'';if(availabilityState.account===id)return;Object.assign(availabilityState,{account:id,mode:'weekly',data:null,members:[],selected:id?readAvailabilitySelection():new Set(),dirty:false});$('#availabilityPage').hidden=true;$('#raidPage').hidden=false;$('.page-top').hidden=false}
 const availabilityDays=['一','二','三','四','五','六','日'];
 function availabilityDate(date,delta=0){const d=new Date(date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+delta);return d.toISOString().slice(0,10)}
 function availabilityMonday(date){const day=new Date(date+'T00:00:00Z').getUTCDay();return availabilityDate(date,-((day+6)%7))}
@@ -13,7 +16,21 @@ function renderAvailability(){
  $('#availabilityBack').onclick=()=>{if(s.dirty&&!confirm('尚未儲存空閒時間，確定離開？'))return;$('#availabilityPage').hidden=true;$('#raidPage').hidden=false;$('.page-top').hidden=false};
  document.querySelectorAll('[data-availability-mode]').forEach(button=>button.onclick=()=>{s.mode=button.dataset.availabilityMode;renderAvailability()});
  if(s.mode!=='weekly'){const week=date=>{s.week=availabilityMonday(date);renderAvailability()};$('#availabilityPrev').onclick=()=>week(availabilityDate(s.week,-7));$('#availabilityNext').onclick=()=>week(availabilityDate(s.week,7));$('#availabilityWeek').onchange=e=>{if(e.target.value)week(e.target.value)}}
- if(common){const renderMembers=()=>{const query=$('#availabilitySearch').value.toLocaleLowerCase();const list=s.members.filter(member=>(member.name+' '+member.id).toLocaleLowerCase().includes(query));$('#availabilityMemberList').innerHTML=list.map(member=>`<label class="check-label"><input type="checkbox" data-available-member="${esc(member.id)}" ${s.selected.has(member.id)?'checked':''}>${esc(member.name)}<small>${esc(member.id)}</small></label>`).join('')||'<p>沒有已填寫的成員</p>';document.querySelectorAll('[data-available-member]').forEach(input=>input.onchange=()=>{input.checked?s.selected.add(input.dataset.availableMember):s.selected.delete(input.dataset.availableMember);renderMembers();renderAvailabilityGrid()});const selected=s.members.filter(member=>s.selected.has(member.id));$('#availabilitySelected').textContent='已選 '+selected.length+' 人'+(selected.length?'：'+selected.map(member=>member.name).join('、'):'');$('#availabilitySelectAll').onclick=()=>{list.forEach(member=>s.selected.add(member.id));renderMembers();renderAvailabilityGrid()}};$('#availabilitySearch').oninput=renderMembers;$('#availabilityClear').onclick=()=>{s.selected.clear();renderMembers();renderAvailabilityGrid()};$('#availabilityDuration').onchange=e=>{s.duration=Number(e.target.value);renderAvailabilityGrid()};renderMembers()}else{
+ if(common){
+  const heading=document.createElement('h3');heading.textContent='已填寫的成員';$('#availabilityMemberList').before(heading);
+  $('#availabilitySearch').placeholder='篩選 Discord 暱稱或 ID';
+  const renderMembers=()=>{
+   const query=$('#availabilitySearch').value.toLocaleLowerCase(),list=s.members.filter(member=>(member.name+' '+member.id).toLocaleLowerCase().includes(query));
+   $('#availabilityMemberList').innerHTML=list.map(member=>`<label class="check-label" title="Discord ID：${esc(member.id)}"><input type="checkbox" data-available-member="${esc(member.id)}" ${s.selected.has(member.id)?'checked':''}><span>${esc(member.name)}</span></label>`).join('')||(s.members.length?'<p>沒有符合搜尋的成員</p>':'<p>沒有已填寫的成員</p>');
+   document.querySelectorAll('[data-available-member]').forEach(input=>input.onchange=()=>{input.checked?s.selected.add(input.dataset.availableMember):s.selected.delete(input.dataset.availableMember);saveAvailabilitySelection();renderMembers();renderAvailabilityGrid()});
+   const selected=s.members.filter(member=>s.selected.has(member.id));$('#availabilitySelected').textContent='已選 '+selected.length+' 人'+(selected.length?'：'+selected.map(member=>member.name).join('、'):'');
+   $('#availabilitySelectAll').textContent=query?'全選搜尋結果':'全選成員';
+   $('#availabilitySelectAll').onclick=()=>{list.forEach(member=>s.selected.add(member.id));saveAvailabilitySelection();renderMembers();renderAvailabilityGrid()};
+  };
+  $('#availabilitySearch').oninput=renderMembers;
+  $('#availabilityClear').onclick=()=>{s.selected.clear();saveAvailabilitySelection();renderMembers();renderAvailabilityGrid()};
+  $('#availabilityDuration').onchange=e=>{s.duration=Number(e.target.value);renderAvailabilityGrid()};renderMembers();
+ }else{
   const edit=add=>{const start=Number($('#availabilityStart').value),end=Number($('#availabilityEnd').value),day=Number($('#availabilityDay').value);if(end<=start){notice('結束時間須晚於開始時間');return}const set=new Set(s.mode==='weekly'?s.data.weekly[day]:availabilitySlots(s.data,dates[day]));for(let slot=start;slot<end;slot++)add?set.add(slot):set.delete(slot);setAvailabilityDay(day,[...set])};$('#availabilityAdd').onclick=()=>edit(true);$('#availabilityRemove').onclick=()=>edit(false);if(s.mode==='dates')$('#availabilityResetDay').onclick=()=>{delete s.data.exceptions[dates[Number($('#availabilityDay').value)]];markAvailabilityDirty();renderAvailabilityGrid()};
   $('#availabilitySave').onclick=()=>action(async()=>{const button=$('#availabilitySave');button.disabled=true;try{const snapshot=structuredClone(s.data),result=await api('/me/availability','PUT',snapshot);s.data.version=result.version;s.dirty=JSON.stringify([s.data.weekly,s.data.exceptions])!==JSON.stringify([snapshot.weekly,snapshot.exceptions]);$('#availabilityDirty').textContent=s.dirty?'尚未儲存':'';toast('空閒時間已儲存');s.members=await api('/availability')}finally{button.disabled=false}});
  }
@@ -23,10 +40,27 @@ function renderAvailability(){
 }
 function markAvailabilityDirty(){availabilityState.dirty=true;if($('#availabilityDirty'))$('#availabilityDirty').textContent='尚未儲存'}
 function setAvailabilityDay(day,slots){const s=availabilityState;slots.sort((a,b)=>a-b);if(s.mode==='weekly')s.data.weekly[day]=slots;else s.data.exceptions[availabilityDate(s.week,day)]=slots;markAvailabilityDirty();renderAvailabilityGrid()}
+let availabilityDrag=null;
+function paintAvailabilitySlot(button,free){
+ const s=availabilityState,day=Number(button.dataset.availabilityDay),slot=Number(button.dataset.availabilitySlot),date=availabilityDate(s.week,day);
+ const slots=new Set(s.mode==='weekly'?s.data.weekly[day]:availabilitySlots(s.data,date));
+ if(slots.has(slot)===free)return;
+ free?slots.add(slot):slots.delete(slot);
+ const sorted=[...slots].sort((a,b)=>a-b);
+ if(s.mode==='weekly')s.data.weekly[day]=sorted;else s.data.exceptions[date]=sorted;
+ button.classList.toggle('free',free);button.setAttribute('aria-pressed',String(free));markAvailabilityDirty();
+ if(s.mode==='dates'){const header=$('#availabilityGrid').children[day+1];if(!header.querySelector('small')){const label=document.createElement('small');label.textContent='日期例外';header.append(label)}}
+}
+document.addEventListener('mouseup',()=>{availabilityDrag=null});
+window.addEventListener('blur',()=>{availabilityDrag=null});
 function renderAvailabilityGrid(){const s=availabilityState,dates=Array.from({length:7},(_,i)=>availabilityDate(s.week,i)),members=s.members.filter(member=>s.selected.has(member.id)),common=s.mode==='common',matches=common?availabilityCommon(members,dates,s.duration||1):null;const days=common?matches.map(day=>day.slots):s.mode==='weekly'?s.data.weekly:dates.map(date=>availabilitySlots(s.data,date));
  let html='<div class="availability-corner"></div>'+dates.map((date,i)=>`<div class="availability-day">${s.mode==='weekly'?'星期'+availabilityDays[i]:date.slice(5)+'（'+availabilityDays[i]+'）'}${s.mode==='dates'&&Object.hasOwn(s.data.exceptions,date)?'<small>日期例外</small>':''}</div>`).join('');
  for(let slot=0;slot<48;slot++){html+=`<div class="availability-time">${availabilityTime(slot)}</div>`;for(let day=0;day<7;day++){const free=days[day].includes(slot),label=(s.mode==='weekly'?'星期'+availabilityDays[day]:dates[day])+' '+availabilityTime(slot)+'–'+availabilityTime(slot+1);html+=common?`<div class="availability-slot ${free?'free':''}" aria-label="${esc(label+(free?'共同空閒':'無共同空閒'))}" title="${esc(label)}"></div>`:`<button type="button" class="availability-slot ${free?'free':''}" data-availability-day="${day}" data-availability-slot="${slot}" aria-pressed="${free}" aria-label="${esc(label)}" title="${esc(label)}"></button>`}}
- $('#availabilityGrid').innerHTML=html;document.querySelectorAll('[data-availability-slot]').forEach(button=>button.onclick=()=>{const day=Number(button.dataset.availabilityDay),slot=Number(button.dataset.availabilitySlot),set=new Set(days[day]);set.has(slot)?set.delete(slot):set.add(slot);setAvailabilityDay(day,[...set])});
+ availabilityDrag=null;
+ const grid=$('#availabilityGrid');grid.innerHTML=html;
+ grid.onmousedown=event=>{const button=event.target.closest('[data-availability-slot]');if(!button||event.button!==0)return;event.preventDefault();availabilityDrag={free:button.getAttribute('aria-pressed')!=='true'};button.dataset.mousePainted='true';paintAvailabilitySlot(button,availabilityDrag.free)};
+ grid.onmouseover=event=>{if(!availabilityDrag)return;if(!(event.buttons&1)){availabilityDrag=null;return}const button=event.target.closest('[data-availability-slot]');if(button)paintAvailabilitySlot(button,availabilityDrag.free)};
+ grid.onclick=event=>{const button=event.target.closest('[data-availability-slot]');if(!button)return;if(event.detail>0&&button.dataset.mousePainted){delete button.dataset.mousePainted;return}delete button.dataset.mousePainted;paintAvailabilitySlot(button,button.getAttribute('aria-pressed')!=='true')};
  if(common)$('#availabilityResults').innerHTML=members.length?matches.map(day=>day.ranges.length?`<h3>${esc(day.date)}</h3>${day.ranges.map(([start,end])=>`<p>${availabilityTime(start)}–${availabilityTime(end)}</p>`).join('')}`:'').join('')||'<p>沒有符合條件的共同時間</p>':'<p>尚未選擇成員</p>';
 }
 $('#availabilityButton').onclick=()=>action(openAvailability);
