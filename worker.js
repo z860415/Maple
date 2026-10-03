@@ -71,6 +71,17 @@ async function route(req,e,ctx){
  const hash=await digest(bearer.slice(7)),u=await one('SELECT users.* FROM sessions JOIN users ON users.id=sessions.user_id WHERE hash=? AND (expires=0 OR expires>?)',hash,now());if(!u)fail(401,'登入已過期，請重新登入');
  if(path!=='/api/auth/logout')await q('UPDATE sessions SET expires=0 WHERE hash=? AND expires>0',hash).run();
  if(path==='/api/auth/logout'&&method==='POST'){await q('DELETE FROM sessions WHERE hash=?',hash).run();return json({ok:true})}
+ if(path==='/api/me/availability'&&method==='GET'){const saved=await one('SELECT * FROM availability WHERE user_id=?',u.id);return json(saved?{...JSON.parse(saved.data),version:saved.version}:{weekly:Array.from({length:7},()=>[]),exceptions:{},version:0})}
+ if(path==='/api/me/availability'&&method==='PUT'){
+  const p=await body(),slots=list=>{if(!Array.isArray(list)||list.length>48||new Set(list).size!==list.length||list.some(v=>!Number.isInteger(v)||v<0||v>47))fail(400,'空閒時間必須以半小時為單位');return [...list].sort((a,b)=>a-b)};
+  if(!Array.isArray(p.weekly)||p.weekly.length!==7||!p.exceptions||typeof p.exceptions!=='object'||Array.isArray(p.exceptions)||Object.keys(p.exceptions).length>366)fail(400,'空閒時間格式有誤，日期例外最多 366 天');
+  const weekly=p.weekly.map(slots),exceptions={};
+  for(const [date,list] of Object.entries(p.exceptions)){if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)fail(400,'日期格式有誤');exceptions[date]=slots(list)}
+  num(p.version,0,Number.MAX_SAFE_INTEGER);
+  const saved=await one('INSERT INTO availability(user_id,data,version,updated) SELECT ?,?,1,? WHERE ?=0 OR EXISTS(SELECT 1 FROM availability WHERE user_id=?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data,version=availability.version+1,updated=excluded.updated WHERE availability.version=? RETURNING version',u.id,JSON.stringify({weekly,exceptions}),now(),p.version,u.id,p.version);
+  if(!saved)fail(409,'空閒時間已在其他分頁更新，請重新載入再編輯');return json(saved);
+ }
+ if(path==='/api/availability'&&method==='GET')return json((await all('SELECT availability.user_id,availability.data,users.name FROM availability JOIN users ON users.id=availability.user_id ORDER BY users.name,users.id')).map(row=>({id:row.user_id,name:row.name,...JSON.parse(row.data)})).filter(row=>row.weekly.some(day=>day.length)||Object.values(row.exceptions).some(day=>day.length)));
  async function characters(){if(JSON.parse(u.profile).name)await q('INSERT OR IGNORE INTO characters VALUES(?,?,?,?)','legacy:'+u.id,u.id,u.profile,0).run();return (await all('SELECT * FROM characters WHERE user_id=? ORDER BY created,id',u.id)).map(c=>({...c,profile:JSON.parse(c.profile)}))}
  async function selectedProfile(p){if(!p.character_id){if(!JSON.parse(u.profile).name)fail(400,'請先填寫角色資料');return u.profile}const c=await one('SELECT profile FROM characters WHERE id=? AND user_id=?',text(p.character_id,100,1),u.id);if(!c)fail(400,'找不到你的角色');return c.profile}
  if(path==='/api/me'&&method==='GET')return json({...u,profile:JSON.parse(u.profile),characters:await characters()});
