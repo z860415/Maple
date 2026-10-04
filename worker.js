@@ -84,7 +84,8 @@ async function route(req,e,ctx){
  if(path==='/api/availability'&&method==='GET')return json((await all('SELECT availability.user_id,availability.data,users.name FROM availability JOIN users ON users.id=availability.user_id ORDER BY users.name,users.id')).map(row=>({id:row.user_id,name:row.name,...JSON.parse(row.data)})).filter(row=>row.weekly.some(day=>day.length)||Object.values(row.exceptions).some(day=>day.length)));
  async function characters(){if(JSON.parse(u.profile).name)await q('INSERT OR IGNORE INTO characters VALUES(?,?,?,?)','legacy:'+u.id,u.id,u.profile,0).run();return (await all('SELECT * FROM characters WHERE user_id=? ORDER BY created,id',u.id)).map(c=>({...c,profile:JSON.parse(c.profile)}))}
  async function selectedProfile(p){if(!p.character_id){if(!JSON.parse(u.profile).name)fail(400,'請先填寫角色資料');return u.profile}const c=await one('SELECT profile FROM characters WHERE id=? AND user_id=?',text(p.character_id,100,1),u.id);if(!c)fail(400,'找不到你的角色');return c.profile}
- if(path==='/api/me'&&method==='GET')return json({...u,profile:JSON.parse(u.profile),characters:await characters()});
+ const isAdmin=u.id==='403923342404485120';
+ if(path==='/api/me'&&method==='GET')return json({...u,is_admin:isAdmin,profile:JSON.parse(u.profile),characters:await characters()});
 if(path==='/api/me/history'&&method==='GET')return json((await all('SELECT raids.id,raids.data,raids.status,signups.profile,signups.seat,signups.attended,signups.paid,signups.joined,settlements.data AS settlement FROM signups JOIN raids ON raids.id=signups.raid_id LEFT JOIN settlements ON settlements.raid_id=raids.id WHERE user_id=? ORDER BY raids.id DESC',u.id)).map(r=>({...r,...JSON.parse(r.data),data:undefined,profile:JSON.parse(r.profile),settlement:JSON.parse(r.settlement||'null')})));
  if(path==='/api/me/profile'&&method==='PUT'){const p=profile(await body());await db.batch([q('UPDATE users SET profile=? WHERE id=?',JSON.stringify(p),u.id),q('INSERT INTO characters VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET profile=excluded.profile','legacy:'+u.id,u.id,JSON.stringify(p),0)]);return json(p)}
  if(path==='/api/me/characters'&&method==='POST'){await characters();const p=profile(await body()),id=JSON.parse(u.profile).name?random():'legacy:'+u.id;await db.batch([q('INSERT INTO characters VALUES(?,?,?,?)',id,u.id,JSON.stringify(p),now()),q("UPDATE users SET profile=? WHERE id=? AND profile='{}'",JSON.stringify(p),u.id)]);return json({id,profile:p})}
@@ -95,9 +96,25 @@ if(path==='/api/me/history'&&method==='GET')return json((await all('SELECT raids
  const rows=await all('SELECT * FROM raids ORDER BY id DESC LIMIT 100');
  const ms=await all('SELECT signups.*,users.name AS discord_name FROM signups JOIN users ON users.id=user_id WHERE raid_id IN (SELECT id FROM raids ORDER BY id DESC LIMIT 100) ORDER BY joined,user_id');
  const ss=await all('SELECT * FROM settlements WHERE raid_id IN (SELECT id FROM raids ORDER BY id DESC LIMIT 100)');
- return json(rows.map(r=>({...JSON.parse(r.data),id:r.id,owner:r.owner,status:r.status,sync_error:r.sync_error,members:ms.filter(m=>m.raid_id===r.id).map(m=>({...m,profile:JSON.parse(m.profile)})),settlement:JSON.parse(ss.find(s=>s.raid_id===r.id)?.data||'null')})));
+ return json(rows.map(r=>({...JSON.parse(r.data),id:r.id,version:r.version,owner:r.owner,status:r.status,sync_error:r.sync_error,members:ms.filter(m=>m.raid_id===r.id).map(m=>({...m,profile:JSON.parse(m.profile)})),settlement:JSON.parse(ss.find(s=>s.raid_id===r.id)?.data||'null')})));
  }
  if(path==='/api/raids'&&method==='POST'){const input=await body(),snapshot=await selectedProfile(input),p=raidInput(input);if(Date.parse(p.starts)<=now())fail(400,'開團時間必須在未來');const results=await db.batch([q('INSERT INTO raids(owner,data) VALUES(?,?) RETURNING id',u.id,JSON.stringify(p)),q('UPDATE signups SET profile=? WHERE raid_id=last_insert_rowid() AND user_id=?',snapshot,u.id)]);return json(results[0].results[0])}
+ const adminMatch=path.match(/^\/api\/admin\/raids\/(\d+)$/);
+ if(adminMatch){
+  if(!isAdmin)fail(403,'只有系統管理員能操作');
+  if(!['PUT','DELETE'].includes(method))fail(405,'不支援此操作');
+  const id=Number(adminMatch[1]),raid=await detail(id),input=await body();
+  if(input.version!==raid.version)fail(409,'團隊資料剛被更新，請重新整理再操作');
+  let statements;
+  if(method==='PUT'){
+   const data=raidInput(input),status=input.status??raid.status;
+   if(!['open','running','done','cancelled'].includes(status))fail(400,'無效的團隊狀態');
+   if(data.capacity<raid.members.filter(member=>member.seat==='confirmed').length)fail(409,'人數不可少於現有正選');
+   statements=[q('UPDATE raids SET data=?,status=? WHERE id=?',JSON.stringify({...data,payout_owner:raid.payout_owner||null}),status,id)];
+  }else statements=[q('DELETE FROM notifications WHERE raid_id=?',id),q('DELETE FROM settlements WHERE raid_id=?',id),q('DELETE FROM signups WHERE raid_id=?',id),q('DELETE FROM raids WHERE id=?',id)];
+  try{await db.batch([q('UPDATE raids SET version=version+1 WHERE id=? AND version=?',id,raid.version),q('INSERT INTO mutation_guard(value) VALUES(changes())'),q('DELETE FROM mutation_guard'),...statements])}catch(error){if(String(error.message).includes('CHECK constraint'))fail(409,'團隊資料剛被更新，請重新整理再操作');throw error}
+  return json({ok:true});
+ }
  const match=path.match(/^\/api\/raids\/(\d+)(?:\/(join|roster|split|owner|payout-owner|status|attendance|settlement|discord|paid|notifications)(?:\/(\d+))?)?$/);if(!match)fail(404,'找不到此功能');
  const id=Number(match[1]),op=match[2],uid=match[3],r=await detail(id),members=r.members;
  const leader=()=>{if(r.owner!==u.id)fail(403,'只有團長能操作')};
