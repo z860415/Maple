@@ -23,6 +23,9 @@
 .calendar-event.done{border-color:#a2bed8;background:#28343e}
 .calendar-event.cancelled{border-color:#ed9dba;background:#392930}
 .calendar-event.selected-event{outline:1px solid var(--accent)}
+.calendar-event.boss{border-left-color:#ffb347;background:#3b3427}.calendar-event.boss time{color:#ffdcaa}
+.calendar-event.quest{border-left-color:#55cbd3;background:#203c40}.calendar-event.quest time{color:#b1edf0}
+.calendar-legend{display:flex;gap:18px;margin-bottom:10px;font-size:12px;color:var(--muted)}.calendar-legend span{display:flex;align-items:center;gap:6px}.calendar-legend span::before{content:'';width:10px;height:10px;background:#ffb347;border-radius:2px}.calendar-legend .quest::before{background:#55cbd3}
 .calendar-more{height:23px;padding:2px 6px;font-size:11px;text-align:left;border:0;background:transparent;color:var(--muted)}
 #dayHeading{font-size:1.1rem;margin:0 0 16px}
 .raid-list-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
