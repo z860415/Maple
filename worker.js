@@ -9,13 +9,14 @@ const num=(v,min,max,integer=true)=>{if(typeof v!=='number'||!Number.isFinite(v)
 function dojoScore(value){if(value==null||value==='')return '';if(typeof value!=='string'||!/^\d{1,6}(?:\.\d{1,6})?[eE]?$/.test(value.trim()))fail(400,'武陵分數請填例如 1.5E 或 0.23E（億）');return Number(value.trim().replace(/[eE]$/,''))+'E'}
 function profile(p){if(p.deathSquad!==undefined&&typeof p.deathSquad!=='boolean')fail(400,'敢死隊象徵須為勾選狀態');return {name:text(p.name,32,1),job:text(p.job,24,1),level:num(p.level,1,300),attack:num(p.attack,0,1e9),boss:num(p.boss,0,5000,false),ignore:num(p.ignore,0,100,false),dojo:dojoScore(p.dojo),deathSquad:p.deathSquad??false}}
 function raidInput(p){const category=p.category??'boss';if(!['boss','quest'].includes(category))fail(400,'無效的團隊類別');if(!Array.isArray(p.bosses)||!p.bosses.length||p.bosses.length>20)fail(400,'請選擇開團項目');if(typeof p.starts!=='string'||!/(Z|[+-]\d\d:\d\d)$/.test(p.starts)||!Number.isFinite(Date.parse(p.starts)))fail(400,'集合時間必須包含時區');return {category,title:text(p.title,80,1),bosses:p.bosses.map(b=>text(b,40,1)),starts:p.starts,location:text(p.location??'當天公告',100),capacity:num(p.capacity,1,60),requirements:text(p.requirements??'',1000),note:text(p.note??'',1000)}}
+export const fixedCosts={'天氣':[11,3500],'AP初始化卷軸':[1,9900],'SP初始化卷軸':[1,9900],'護身符':[13,3000],'原地復活術':[13,4300],'白金神奇剪刀':[1,7100],'神奇剪刀':[1,3900]};
 export function calculate(p,users){
  num(p.fee,0,100,false);num(p.rate,1,1e9);if(!Array.isArray(p.items)||!Array.isArray(p.costs)||p.items.length>100||p.costs.length>100)fail(400,'項目過多');
  // Keep percentage precision, but floor every currency deduction using integer arithmetic.
  const fs=Math.round(p.fee*10000);if(Math.abs(fs/10000-p.fee)>1e-10)fail(400,'手續費最多四位小數');
  let gross=0n,cost=0n;const rate=BigInt(p.rate);
  for(const i of p.items){text(i.name,80,1);gross+=BigInt(num(i.quantity,1,100000))*BigInt(num(i.price,0,1e12))}
- for(const c of p.costs){text(c.name,80,1);num(c.quantity,1,100000);num(c.points,0,1e12);num(c.mesos,0,1e12);if(!['points','mesos'].includes(c.basis))fail(400,'成本換算欄位有誤');cost+=c.basis==='mesos'?BigInt(c.mesos):BigInt(c.points)*10000000n/rate}
+ for(const c of p.costs){text(c.name,80,1);num(c.quantity,1,100000);if(c.basis==='fixed'){const pack=fixedCosts[c.name];if(!pack)fail(400,'找不到固定成本');const value=BigInt(c.quantity)*BigInt(pack[1])*10000000n/(BigInt(pack[0])*rate);c.points=c.quantity*pack[1]/pack[0];c.mesos=Number(value);cost+=value}else{num(c.points,0,1e12);num(c.mesos,0,1e12);if(!['points','mesos'].includes(c.basis))fail(400,'成本換算欄位有誤');cost+=c.basis==='mesos'?BigInt(c.mesos):BigInt(c.points)*10000000n/rate}}
  const fee=gross*BigInt(fs)/1000000n,total=gross-fee-cost;
  if(total<0n)fail(400,'本團淨收益為負，請確認售價或成本');
  if(gross>BigInt(Number.MAX_SAFE_INTEGER)||total>BigInt(Number.MAX_SAFE_INTEGER))fail(400,'金額過大，請拆分結算');
@@ -92,10 +93,25 @@ if(path==='/api/me/history'&&method==='GET')return json((await all('SELECT raids
  const characterMatch=path.match(/^\/api\/me\/characters\/([^/]+)$/);
  if(characterMatch&&method==='PUT'){const id=decodeURIComponent(characterMatch[1]),p=profile(await body());const c=await one('UPDATE characters SET profile=? WHERE id=? AND user_id=? RETURNING id',JSON.stringify(p),id,u.id);if(!c)fail(404,'找不到你的角色');return json({id,profile:p})}
  async function detail(id){const r=await one('SELECT * FROM raids WHERE id=?',id);if(!r)fail(404,'找不到這個團');const members=await all('SELECT signups.*,users.name AS discord_name FROM signups JOIN users ON users.id=user_id WHERE raid_id=? ORDER BY joined,user_id',id);const s=await one('SELECT data FROM settlements WHERE raid_id=?',id);return {...JSON.parse(r.data),...r,data:undefined,members:members.map(m=>({...m,profile:JSON.parse(m.profile)})),settlement:s?JSON.parse(s.data):null}}
+ if(path==='/api/me/templates'&&method==='GET'){const row=await one('SELECT * FROM raid_templates WHERE user_id=?',u.id);return json(row?{templates:JSON.parse(row.data),version:row.version}:{templates:[],version:0})}
+ if(path==='/api/me/templates'&&method==='PUT'){
+  const input=await body();num(input.version,0,Number.MAX_SAFE_INTEGER);
+  if(!Array.isArray(input.templates)||input.templates.length>30)fail(400,'範本最多 30 個');
+  const templates=input.templates.map(t=>({id:text(t.id,100,1),name:text(t.name,60,1),...raidInput({...t,starts:'2099-01-01T00:00:00Z'})}));
+  if(new Set(templates.map(t=>t.id)).size!==templates.length)fail(400,'範本編號重複');
+  const saved=await one('INSERT INTO raid_templates(user_id,data,version) SELECT ?,?,1 WHERE ?=0 OR EXISTS(SELECT 1 FROM raid_templates WHERE user_id=?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data,version=raid_templates.version+1 WHERE raid_templates.version=? RETURNING version',u.id,JSON.stringify(templates),input.version,u.id,input.version);
+  if(!saved)fail(409,'範本已在其他分頁更新，請重新開啟');return json(saved);
+ }
+ if(path==='/api/raids/search'&&method==='GET'){
+  const query=(url.searchParams.get('q')||'').trim();if(query.length>100)fail(400,'搜尋文字過長');
+  const before=Number(url.searchParams.get('before')||Number.MAX_SAFE_INTEGER);num(before,1,Number.MAX_SAFE_INTEGER);
+  const ids=await all("SELECT id FROM raids WHERE id<? AND (?='' OR instr(lower(json_extract(data,'$.title')),lower(?))>0 OR instr(lower(json_extract(data,'$.bosses')),lower(?))>0 OR EXISTS(SELECT 1 FROM signups JOIN users ON users.id=signups.user_id WHERE signups.raid_id=raids.id AND (instr(lower(signups.profile),lower(?))>0 OR instr(lower(users.name),lower(?))>0))) ORDER BY id DESC LIMIT 11",before,query,query,query,query,query);
+  return json({raids:await Promise.all(ids.slice(0,10).map(row=>detail(row.id))),more:ids.length>10});
+ }
  if(path==='/api/raids'&&method==='GET'){
- const rows=await all('SELECT * FROM raids ORDER BY id DESC LIMIT 100');
- const ms=await all('SELECT signups.*,users.name AS discord_name FROM signups JOIN users ON users.id=user_id WHERE raid_id IN (SELECT id FROM raids ORDER BY id DESC LIMIT 100) ORDER BY joined,user_id');
- const ss=await all('SELECT * FROM settlements WHERE raid_id IN (SELECT id FROM raids ORDER BY id DESC LIMIT 100)');
+ const rows=await all("SELECT * FROM raids WHERE id IN (SELECT id FROM raids ORDER BY id DESC LIMIT 10) OR status IN ('open','running') OR EXISTS(SELECT 1 FROM signups WHERE raid_id=raids.id AND user_id=?) ORDER BY id DESC",u.id),ids=JSON.stringify(rows.map(r=>r.id));
+ const ms=await all('SELECT signups.*,users.name AS discord_name FROM signups JOIN users ON users.id=user_id WHERE raid_id IN (SELECT value FROM json_each(?)) ORDER BY joined,user_id',ids);
+ const ss=await all('SELECT * FROM settlements WHERE raid_id IN (SELECT value FROM json_each(?))',ids);
  return json(rows.map(r=>({...JSON.parse(r.data),id:r.id,version:r.version,owner:r.owner,status:r.status,sync_error:r.sync_error,members:ms.filter(m=>m.raid_id===r.id).map(m=>({...m,profile:JSON.parse(m.profile)})),settlement:JSON.parse(ss.find(s=>s.raid_id===r.id)?.data||'null')})));
  }
  if(path==='/api/raids'&&method==='POST'){const input=await body(),snapshot=await selectedProfile(input),p=raidInput(input);if(Date.parse(p.starts)<=now())fail(400,'開團時間必須在未來');const results=await db.batch([q('INSERT INTO raids(owner,data) VALUES(?,?) RETURNING id',u.id,JSON.stringify(p)),q('UPDATE signups SET profile=? WHERE raid_id=last_insert_rowid() AND user_id=?',snapshot,u.id)]);return json(results[0].results[0])}
@@ -117,10 +133,11 @@ if(path==='/api/me/history'&&method==='GET')return json((await all('SELECT raids
  }
  const match=path.match(/^\/api\/raids\/(\d+)(?:\/(join|roster|split|owner|payout-owner|status|attendance|settlement|discord|paid|notifications)(?:\/(\d+))?)?$/);if(!match)fail(404,'找不到此功能');
  const id=Number(match[1]),op=match[2],uid=match[3],r=await detail(id),members=r.members;
+ if(!op&&method==='GET')return json(r);
  const leader=()=>{if(r.owner!==u.id)fail(403,'只有團長能操作')};
  async function mutate(statements){try{return await db.batch([q('UPDATE raids SET version=version+1 WHERE id=? AND version=?',id,r.version),q('INSERT INTO mutation_guard(value) VALUES(changes())'),q('DELETE FROM mutation_guard'),...statements])}catch(err){if(String(err.message).includes('CHECK constraint'))fail(409,'團隊資料剛被更新，請重新整理再操作');throw err}}
  const refresh=()=>{if(e.DISCORD_WEBHOOK_URL&&r.message_id)ctx.waitUntil(publish(true).catch(()=>{}))};
- if(!op&&method==='PUT'){leader();if(r.status!=='open')fail(409,'只有招募中的團能修改');const p=raidInput(await body());if(p.capacity<members.filter(m=>m.seat==='confirmed').length)fail(409,'人數不可少於現有正選');await mutate([q('UPDATE raids SET data=? WHERE id=?',JSON.stringify({...p,payout_owner:r.payout_owner||null}),id)]);refresh();return json({ok:true})}
+ if(!op&&method==='PUT'){leader();if(r.status!=='open')fail(409,'只有招募中的團能修改');const p=raidInput(await body());if(p.capacity<members.filter(m=>m.seat==='confirmed').length)fail(409,'人數不可少於現有正選');await mutate([q('UPDATE raids SET data=? WHERE id=?',JSON.stringify({...p,payout_owner:r.payout_owner||null,roster_confirmed:r.roster_confirmed||false}),id)]);refresh();return json({ok:true})}
  if(op==='join'&&method==='POST'){if(r.status!=='open')fail(409,'此團已停止報名');if(members.some(m=>m.user_id===u.id))fail(409,'你已經報名此團');const p=await body(),snapshot=await selectedProfile(p),seat='waiting';await mutate([q('INSERT INTO signups(raid_id,user_id,profile,note,available,seat,joined) VALUES(?,?,?,?,?,?,?)',id,u.id,snapshot,text(p.note??'',500),text(p.available??'',100),seat,now())]);refresh();return json({seat})}
  if(op==='join'&&method==='DELETE'){if(r.status!=='open'||r.owner===u.id)fail(409,'無法退出；團長請使用取消團隊');await mutate([q('DELETE FROM signups WHERE raid_id=? AND user_id=?',id,u.id),q("UPDATE raids SET data=json_remove(data,'$.payout_owner') WHERE id=? AND json_extract(data,'$.payout_owner')=?",id,u.id)]);refresh();return json({ok:true})}
  const payoutOwner=r.payout_owner||r.owner;
@@ -151,7 +168,7 @@ if(path==='/api/me/history'&&method==='GET')return json((await all('SELECT raids
   if(target.seat==='waiting')statements.push(q("UPDATE signups SET seat=CASE WHEN user_id=? THEN 'confirmed' ELSE 'waiting' END WHERE raid_id=? AND user_id IN (?,?)",target.user_id,id,target.user_id,r.owner));
   await mutate(statements);refresh();return json({ok:true});
  }
- if(op==='roster'&&method==='PUT'){if(r.status!=='open')fail(409,'只有招募中的團能調整正選');const p=await body();if(!Array.isArray(p.users)||p.users.length>60||new Set(p.users).size!==p.users.length||!p.users.includes(r.owner)||p.users.some(user=>!members.some(m=>m.user_id===user)))fail(400,'正選名單須包含團長，且只能選擇已報名成員');if(p.users.length>r.capacity)fail(400,'正選人數超過團隊上限');await mutate([q("UPDATE signups SET seat=CASE WHEN user_id IN (SELECT value FROM json_each(?)) THEN 'confirmed' ELSE 'waiting' END WHERE raid_id=?",JSON.stringify(p.users),id)]);refresh();return json({ok:true})}
+ if(op==='roster'&&method==='PUT'){if(r.status!=='open')fail(409,'只有招募中的團能調整正選');const p=await body();if(!Array.isArray(p.users)||p.users.length>60||new Set(p.users).size!==p.users.length||!p.users.includes(r.owner)||p.users.some(user=>!members.some(m=>m.user_id===user)))fail(400,'正選名單須包含團長，且只能選擇已報名成員');if(p.users.length>r.capacity)fail(400,'正選人數超過團隊上限');await mutate([q("UPDATE signups SET seat=CASE WHEN user_id IN (SELECT value FROM json_each(?)) THEN 'confirmed' ELSE 'waiting' END WHERE raid_id=?",JSON.stringify(p.users),id),q("UPDATE raids SET data=json_set(data,'$.roster_confirmed',json('true')) WHERE id=?",id)]);refresh();return json({ok:true})}
  if(op==='notifications')return json(await handleNotifications(req,e,r,uid,body));
  if(op==='status'&&method==='PUT'){const p=await body();if(!({open:['running','cancelled'],running:['done'],done:[],cancelled:[]}[r.status]||[]).includes(p.status))fail(409,'不允許這個狀態變更');await mutate([q('UPDATE raids SET status=? WHERE id=?',p.status,id)]);refresh();return json({ok:true})}
 if(op==='attendance'&&method==='PUT'){if(!['running','done'].includes(r.status)||r.settlement)fail(409,'請先開始打王，已結算則需先清除結算');const p=await body();if('user_id' in p){if(typeof p.attended!=='boolean'||!members.some(m=>m.user_id===p.user_id&&m.seat==='confirmed'))fail(400,'出席只能選擇正選成員');await mutate([q('UPDATE signups SET attended=? WHERE raid_id=? AND user_id=?',p.attended?1:0,id,p.user_id)]);return json({ok:true})}if(!Array.isArray(p.users)||p.users.length>60||new Set(p.users).size!==p.users.length||p.users.some(id=>!members.some(m=>m.user_id===id&&m.seat==='confirmed')))fail(400,'出席只能選擇正選成員');await mutate([q('UPDATE signups SET attended=0 WHERE raid_id=?',id),q('UPDATE signups SET attended=1 WHERE raid_id=? AND user_id IN (SELECT value FROM json_each(?))',id,JSON.stringify(p.users))]);return json({ok:true})}
@@ -178,7 +195,7 @@ export function notificationTemplate(kind){
 }
 export function notificationSettlementValues(settlement){
  const input=settlement?.input||{},result=settlement?.result||{},fmt=value=>Math.floor(Number(value||0)).toLocaleString('zh-TW');
- return {'戰利品明細':(input.items||[]).map(item=>`${item.name} × ${fmt(item.quantity)}｜單價 ${fmt(item.price)} 楓幣｜總售價 ${fmt(item.quantity*item.price)} 楓幣`).join('\n')||'無','成本明細':(input.costs||[]).map(cost=>`${cost.name} × ${fmt(cost.quantity)}｜${cost.basis==='mesos'?fmt(cost.mesos)+' 楓幣':fmt(cost.points)+' 楓點（折合 '+fmt(Number(cost.points)*10000000/Number(input.rate))+' 楓幣）'}`).join('\n')||'無','總售價':fmt(result.gross),'手續費':fmt(result.fee),'成本合計':fmt(result.cost),'淨收益':fmt(result.total),'分寶人數':fmt(result.count),'分寶金額':fmt(result.each),'分寶餘額':fmt(result.remainder)};
+ return {'戰利品明細':(input.items||[]).map(item=>`${item.name} × ${fmt(item.quantity)}｜單價 ${fmt(item.price)} 楓幣｜總售價 ${fmt(item.quantity*item.price)} 楓幣`).join('\n')||'無','成本明細':(input.costs||[]).map(cost=>`${cost.name} × ${fmt(cost.quantity)}｜${cost.basis==='mesos'?fmt(cost.mesos)+' 楓幣':(cost.basis==='fixed'?Number(cost.points).toLocaleString('zh-TW',{maximumFractionDigits:4}):fmt(cost.points))+' 楓點（折合 '+fmt(cost.basis==='fixed'?cost.mesos:Number(cost.points)*10000000/Number(input.rate))+' 楓幣）'}`).join('\n')||'無','總售價':fmt(result.gross),'手續費':fmt(result.fee),'成本合計':fmt(result.cost),'淨收益':fmt(result.total),'分寶人數':fmt(result.count),'分寶金額':fmt(result.each),'分寶餘額':fmt(result.remainder)};
 }
 export function notificationPayoutName(raid){const member=raid.members.find(m=>m.user_id===(raid.payout_owner||raid.owner));const profile=typeof member?.profile==='string'?JSON.parse(member.profile):member?.profile;return profile?.name||'團長'}
 export async function notificationRaid(e,id){
