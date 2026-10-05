@@ -19,7 +19,7 @@ test('account templates and archive search pagination beyond latest 100 raids',a
  const mf=new Miniflare({modules:true,scriptPath:'worker.js',compatibilityDate:'2026-08-01',d1Databases:['DB']});
  try{
   const db=await mf.getD1Database('DB');await db.exec((await readFile('schema.sql','utf8')).replace(/CREATE TRIGGER[\s\S]*?END;/,m=>m.replace(/\n/g,' ')));
-  for(const id of ['1','2']){await db.prepare('INSERT INTO users(id,name) VALUES(?,?)').bind(id,'玩家'+id).run();await db.prepare('INSERT INTO sessions VALUES(?,?,0)').bind(await digest('product-'+id),id).run()}
+  for(const id of ['1','2']){await db.prepare('INSERT INTO users(id,name,profile) VALUES(?,?,?)').bind(id,'玩家'+id,JSON.stringify({name:'角色'+id,job:'主教',level:180,attack:100,boss:0,ignore:0})).run();await db.prepare('INSERT INTO sessions VALUES(?,?,0)').bind(await digest('product-'+id),id).run()}
   const api=async(path,method='GET',body,user='1',status=200)=>{const response=await mf.dispatchFetch('https://api.test/api'+path,{method,headers:{Authorization:'Bearer product-'+user,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const result=await response.json();assert.equal(response.status,status,JSON.stringify(result));return result};
   const template={id:'template1',name:'週末',title:'測試團',category:'quest',bosses:['一條龍'],capacity:6,location:'入口',requirements:'140UP',note:'備註'};
   assert.deepEqual(await api('/me/templates'),{templates:[],version:0});

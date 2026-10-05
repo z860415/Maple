@@ -20,14 +20,15 @@ function renderPersonalOverview(){
 function renderRaidWorkflow(r){
  const owner=r.owner===state.me.id,payout=r.payout_owner===state.me.id;if(!owner&&!payout)return;
  const paid=r.settlement&&r.settlement.result.users.every(id=>r.members.find(m=>m.user_id===id)?.paid),step=r.status==='cancelled'?-1:r.settlement?(paid?5:4):r.status==='done'?3:r.status==='running'?2:r.roster_confirmed?1:0;
- const flow=document.createElement('div');flow.className='raid-workflow';flow.innerHTML=`<ol aria-label="團隊進度">${['招募／正選','集合','出席','結算','領取','完成'].map((label,index)=>`<li class="${index===step?'current':index<step?'finished':''}" ${index===step?'aria-current="step"':''}>${label}</li>`).join('')}</ol><p>${r.status==='cancelled'?'團隊已取消':step===0?'確認正選名單後，通知隊友集合並開始。':step===1?'正選已確認，可通知集合並開始。':step===2?'勾選實際出席人員，結束後完成團隊。':step===3?'確認出席後，輸入戰利品及成本結算。':step===4?'通知出席成員領取分寶，領取後標記已領。':'所有分寶已領取。'}</p>`;
+ const flow=document.createElement('div');flow.className='raid-workflow';flow.innerHTML=`<ol aria-label="團隊進度">${['招募／正選','集合','出席','結算','領取','完成'].map((label,index)=>{const finished=index<step||step===5,current=index===step;return `<li class="${current?'current ':''}${finished?'finished':''}" ${current?'aria-current="step"':''}><span class="workflow-node" aria-hidden="true">${finished?'✓':index+1}</span><span class="workflow-label">${label}</span><span class="workflow-state">${current?(step===5?'已完成':'進行中'):finished?'<span class="sr-only">已完成</span>':''}</span></li>`}).join('')}</ol><p>${r.status==='cancelled'?'團隊已取消':step===0?'確認正選名單後，通知隊友集合並開始。':step===1?'正選已確認，可通知集合並開始。':step===2?'勾選實際出席人員，結束後完成團隊。':step===3?'確認出席後，輸入戰利品及成本結算。':step===4?'通知出席成員領取分寶，領取後標記已領。':'所有分寶已領取。'}</p>`;
  $('#detail .tags').after(flow);
  if($('#start'))$('#start').classList.toggle('primary',!!r.roster_confirmed);
  if($('#saveRoster'))$('#saveRoster').classList.toggle('primary',!r.roster_confirmed);
- const actions=$('#detail .actions'),more=document.createElement('details');more.className='raid-more';more.innerHTML='<summary>更多操作</summary><div class="actions"></div>';
- for(const id of ['edit','splitRaid','sync','share','duplicate','cancel','resetLoot']){const button=$('#'+id);if(button)more.querySelector('div').append(button)}
- if(more.querySelector('button'))actions.after(more);
- const save=document.createElement('button');save.id='saveTemplate';save.type='button';save.textContent='存為常用範本';save.onclick=()=>action(()=>saveRaidTemplate(r));more.querySelector('div').prepend(save);if(!more.isConnected)actions.after(more);
+ const actions=$('#detail .actions'),secondary=document.createElement('div');secondary.className='actions raid-secondary';
+ flow.after(actions);
+ if(step===3&&$('#loot'))actions.append($('#loot'));
+ for(const id of ['edit','splitRaid','sync','share','duplicate','cancel','resetLoot']){const button=$('#'+id);if(button)secondary.append(button)}
+ const save=document.createElement('button');save.id='saveTemplate';save.type='button';save.textContent='存為常用範本';save.onclick=()=>action(()=>saveRaidTemplate(r));secondary.prepend(save);actions.after(secondary);
 }
 async function saveRaidTemplate(r){
  const saved=await api('/me/templates');

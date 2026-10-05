@@ -9,7 +9,7 @@ test('administrator identity, edit any status, version guard and dependent delet
  try{
   const db=await mf.getD1Database('DB'),admin='403923342404485120';
   await db.exec((await readFile('schema.sql','utf8')).replace(/CREATE TRIGGER[\s\S]*?END;/,m=>m.replace(/\n/g,' ')));
-  for(const id of ['1',admin]){await db.prepare('INSERT INTO users(id,name) VALUES(?,?)').bind(id,'玩家'+id).run();await db.prepare('INSERT INTO sessions VALUES(?,?,0)').bind(await digest('admin-test-'+id),id).run()}
+  for(const id of ['1',admin]){await db.prepare('INSERT INTO users(id,name,profile) VALUES(?,?,?)').bind(id,'玩家'+id,JSON.stringify({name:'角色'+id,job:'主教',level:180,attack:100,boss:0,ignore:0})).run();await db.prepare('INSERT INTO sessions VALUES(?,?,0)').bind(await digest('admin-test-'+id),id).run()}
   const api=async(path,method='GET',body,user=admin,status=200)=>{const response=await mf.dispatchFetch('https://api.test/api'+path,{method,headers:{Authorization:'Bearer admin-test-'+user,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const result=await response.json();assert.equal(response.status,status,JSON.stringify(result));return result};
   assert.equal((await api('/me')).is_admin,true);assert.equal((await api('/me','GET',null,'1')).is_admin,false);
   const data={category:'quest',title:'原團',bosses:['月妙'],starts:'2020-01-01T12:00:00Z',capacity:6,location:'原地點'};

@@ -72,6 +72,8 @@ async function route(req,e,ctx){
  const hash=await digest(bearer.slice(7)),u=await one('SELECT users.* FROM sessions JOIN users ON users.id=sessions.user_id WHERE hash=? AND (expires=0 OR expires>?)',hash,now());if(!u)fail(401,'登入已過期，請重新登入');
  if(path!=='/api/auth/logout')await q('UPDATE sessions SET expires=0 WHERE hash=? AND expires>0',hash).run();
  if(path==='/api/auth/logout'&&method==='POST'){await q('DELETE FROM sessions WHERE hash=?',hash).run();return json({ok:true})}
+ const characterOperation=path==='/api/me'&&method==='GET'||path==='/api/me/profile'&&method==='PUT'||path==='/api/me/characters'&&method==='POST'||/^\/api\/me\/characters\/[^/]+$/.test(path)&&method==='PUT';
+ if(!characterOperation&&!await one('SELECT id FROM characters WHERE user_id=? LIMIT 1',u.id)&&!(await characters()).length)fail(403,'請先新增至少一個「我的角色」才能使用其他功能');
  if(path==='/api/me/availability'&&method==='GET'){const saved=await one('SELECT * FROM availability WHERE user_id=?',u.id);return json(saved?{...JSON.parse(saved.data),version:saved.version}:{weekly:Array.from({length:7},()=>[]),exceptions:{},version:0})}
  if(path==='/api/me/availability'&&method==='PUT'){
   const p=await body(),slots=list=>{if(!Array.isArray(list)||list.length>48||new Set(list).size!==list.length||list.some(v=>!Number.isInteger(v)||v<0||v>47))fail(400,'空閒時間必須以半小時為單位');return [...list].sort((a,b)=>a-b)};
